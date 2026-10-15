@@ -30,7 +30,11 @@ async def upload_contract(
     db: AsyncSession = Depends(get_db),
     current: TokenPayload = Depends(get_current_user),
 ):
-    """上传合同 → 自动解析 → 返回结构化章节"""
+    """上传合同 → 自动解析 → 返回结构化章节
+
+    解析失败不会抛异常，而是返回 status=parsing_failed + parse_error，
+    便于前端在文件列表中逐条展示原因（批量上传时互不影响）。
+    """
     contract = await contract_service.upload_and_parse(
         db=db, file=file, uploader_id=current.user_id
     )
@@ -41,7 +45,6 @@ async def upload_contract(
         import json
         parsed_sections = json.loads(contract.parsed_sections)
 
-    # 中文检测：如果被阻断，upload_and_parse 已抛 ValidationError
     return ContractUploadResponse(
         id=contract.id,
         filename=contract.filename,
@@ -50,7 +53,8 @@ async def upload_contract(
         word_count=len(contract.parsed_content or ""),
         language="zh-CN",
         sections=parsed_sections,
-        parse_errors=[],  # upload_and_parse 失败会抛异常走全局错误处理
+        parse_errors=[contract.parse_error] if contract.parse_error else [],
+        parse_error=contract.parse_error,
     )
 
 
@@ -72,6 +76,7 @@ async def list_contracts(
             file_type=c.file_type,
             status=c.status.value,
             created_at=c.created_at,
+            parse_error=c.parse_error,
         )
         for c in contracts
     ]
@@ -106,6 +111,7 @@ async def get_contract(
         status=contract.status.value,
         parsed_content=contract.parsed_content,
         parsed_sections=parsed_sections,
+        parse_error=contract.parse_error,
         created_at=contract.created_at,
         uploader_id=contract.uploader_id,
     )

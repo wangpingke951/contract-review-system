@@ -22,3 +22,7 @@ backend/server*.log
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 本地工作数据与自动化产物（不入库）
+.workbuddy/
+.playwright-mcp/

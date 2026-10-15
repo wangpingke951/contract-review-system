@@ -24,6 +24,8 @@ class ContractUploadResponse(BaseModel):
     language: str = "zh-CN"
     sections: List[ContractSectionOut] = Field(default_factory=list)
     parse_errors: List[str] = Field(default_factory=list)
+    # 面向用户的失败原因（成功时为 None）
+    parse_error: Optional[str] = None
 
 
 class ContractListItem(BaseModel):
@@ -33,6 +35,7 @@ class ContractListItem(BaseModel):
     file_type: str
     status: str
     created_at: datetime
+    parse_error: Optional[str] = None
 
 
 class ContractListResponse(BaseModel):
@@ -48,5 +51,6 @@ class ContractDetailResponse(BaseModel):
     status: str
     parsed_content: Optional[str] = None
     parsed_sections: Optional[List[dict]] = None
+    parse_error: Optional[str] = None
     created_at: datetime
     uploader_id: int

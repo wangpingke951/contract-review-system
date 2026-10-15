@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     DEBUG: bool = True
 
+    # 单次审查的最长等待时间（秒）。超过则中断并提示用户稍后重试，
+    # 避免同步请求长时间挂起占用连接（PRD 4.3 异常处理假设值 120 秒）
+    REVIEW_TIMEOUT_SECONDS: int = 120
+
     # ——— 计算属性 ———
     @property
     def mysql_dsn(self) -> str:

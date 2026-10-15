@@ -14,6 +14,15 @@
 | 对话追问 | 围绕审查报告的 WebSocket 流式多轮对话，自动携带报告摘要与知识库检索证据，历史持久化 |
 | 管理后台 | 知识文档上传/删除（同步清理向量库）、风险类别增删（至少保留 1 个，历史报告类别名快照不受影响） |
 | 中文检测 | 自动识别非中文合同并阻断（MVP 明确仅支持中文） |
+| 法律智能问答 | 独立于合同审查的日常法律咨询页面：多会话管理、常见问题快捷入口、WebSocket 流式回答 |
+
+## 界面预览
+
+| 批量上传与解析异常提示 | 解析结果预览确认 |
+|:---:|:---:|
+| ![批量上传与解析异常提示](docs/screenshots/batch-upload-and-errors.png) | ![解析结果预览确认](docs/screenshots/parse-preview.png) |
+| **审查报告（风险就地批注）** | **法律智能问答** |
+| ![审查报告](docs/screenshots/review-report.png) | ![法律智能问答](docs/screenshots/legal-assistant.png) |
 
 ## 技术栈
 
@@ -78,7 +87,8 @@ CREATE DATABASE contract_review CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
 cd backend
 cp .env.example .env    # 编辑 .env 填入你的 LLM / Embedding API Key
 pip install -r requirements.txt
-python tests/seed_db.py  # 初始化默认账号与 9 个风险类别（幂等）
+python tests/seed_db.py     # 初始化默认账号与 9 个风险类别（幂等）
+python tests/migrate_db.py  # 补齐后加的字段（幂等；已建过库的环境需要执行）
 uvicorn app.main:app --port 8000
 ```
 
@@ -150,6 +160,7 @@ docker compose up -d
 | 合同 | `POST /api/contracts/upload` · `GET /api/contracts` · `GET/DELETE /api/contracts/{id}` |
 | 审查 | `POST /api/reviews` · `GET /api/reviews/{id}` · `POST /api/reviews/{id}/retry` · `GET /api/reviews/by-contract/{contract_id}` |
 | 对话 | `GET /api/chat/conversations/{review_id}` · `GET .../messages` · `WS /ws/chat/{conv_id}?token=<jwt>` |
+| 法律问答 | `POST/GET /api/assistant/sessions` · `GET/POST /api/assistant/sessions/{id}/messages` · `DELETE .../{id}` · `WS /ws/assistant/{session_id}?token=<jwt>` |
 | 管理 | `POST /api/admin/knowledge/upload` · `GET/DELETE /api/admin/knowledge/{id}` · `GET/POST/DELETE /api/admin/categories` |
 | 健康 | `GET /api/health` |
 

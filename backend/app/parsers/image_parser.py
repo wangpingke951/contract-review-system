@@ -19,11 +19,20 @@ class ImageParser(ContractParser):
     SUPPORTED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
     async def parse(self, file_path: str) -> StructuredContract:
-        errors: List[str] = []
-        raw_text = ""
-
+        # OCR 组件是可选依赖，缺失时给出明确指引而不是抛栈
         try:
             from paddleocr import PaddleOCR
+        except ImportError:
+            return StructuredContract(
+                raw_text="",
+                parse_errors=[
+                    "该文件需要 OCR 识别，当前环境未安装 OCR 组件（PaddleOCR）。"
+                    "请安装后重试（pip install paddleocr paddlepaddle），"
+                    "或改用 PDF / Word 格式上传"
+                ],
+            )
+
+        try:
             ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
             result = ocr.ocr(file_path, cls=True)
             lines: List[str] = []
@@ -34,29 +43,37 @@ class ImageParser(ContractParser):
                     text = item[1][0]  # item = [bbox, (text, confidence)]
                     lines.append(text)
             raw_text = "\n".join(lines)
-        except ImportError:
-            errors.append("PaddleOCR 未安装，请先执行: pip install paddleocr paddlepaddle")
         except Exception as e:
-            errors.append(f"图片 OCR 失败: {e}")
+            return StructuredContract(
+                raw_text="", parse_errors=[f"图片识别失败：{e}"]
+            )
 
-        chinese_ratio = detect_chinese_ratio(raw_text) if raw_text else 0
+        # OCR 跑通但没识别出文字：通常是图片质量问题
+        if not raw_text.strip():
+            return StructuredContract(
+                raw_text="",
+                parse_errors=[
+                    "未从图片中识别出文字。建议重新拍照——保持画面平整、光线充足、"
+                    "文字水平且清晰，或改用扫描件上传"
+                ],
+            )
+
+        chinese_ratio = detect_chinese_ratio(raw_text)
         language = "zh-CN" if chinese_ratio > 0.3 else "unknown"
 
         # OCR 结果不做复杂切分（扫描件结构不明显），整个作为一个 section
-        sections = []
-        if raw_text:
-            sections.append(ContractSection(
-                title="OCR 识别全文",
-                level=SectionLevel.TOP,
-                content=raw_text,
-                char_start=0,
-                char_end=len(raw_text),
-            ))
+        sections = [ContractSection(
+            title="OCR 识别全文",
+            level=SectionLevel.TOP,
+            content=raw_text,
+            char_start=0,
+            char_end=len(raw_text),
+        )]
 
         return StructuredContract(
             raw_text=raw_text,
             sections=sections,
             word_count=len(raw_text),
             language=language,
-            parse_errors=errors,
+            parse_errors=[],
         )

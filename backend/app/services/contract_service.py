@@ -25,6 +25,9 @@ from app.parsers.factory import get_parser, supported_extensions
 
 settings = get_settings()
 
+# 解析内容少于该字数视为无效合同（PRD 4.3 异常处理：解析内容过少应阻断审查）
+MIN_CONTRACT_CHARS = 200
+
 # —— 文件扩展名 → file_type 映射 ——
 _TYPE_MAP = {
     "pdf": "pdf",
@@ -41,14 +44,17 @@ async def upload_and_parse(
     uploader_id: int,
 ) -> Contract:
     """
-    上传 + 解析（同步执行，Phase 6 改为 Celery 异步）
+    上传 + 解析（同步执行）
 
     流程：
-    1. 校验文件类型和大小
+    1. 校验文件类型和大小（不通过 → 抛 ValidationError，文件不入库）
     2. 保存到 UPLOAD_DIR/{uploader_id}/{timestamp}_{safe_filename}
     3. 调 parser 解析
-    4. 中文检测 → 非中文阻断
+    4. 判定结果：解析报错 / 内容过少 / 非中文 → status=parsing_failed + parse_error
     5. 写 DB
+
+    设计说明：解析类失败**不再抛异常**，而是落库并随正常响应返回。
+    这样批量上传时单个文件失败不会中断整批，前端也能逐条展示失败原因。
     """
     # —— 1. 校验 ——
     filename = file.filename or "unnamed"
@@ -92,28 +98,43 @@ async def upload_and_parse(
     parser = get_parser(filename)
     result = await parser.parse(file_path)
 
-    # —— 5. 中文检测 ——
-    if result.language != "zh-CN" and result.word_count > 50:
-        # 非中文合同，按 PRD 明确排除：提示用户
-        contract.status = ContractStatus.PARSING_FAILED
-        await db.commit()
-        raise ValidationError(
-            f"当前版本仅支持中文合同，检测到非中文文本（中文字符占比过低）"
-        )
+    # —— 5. 判定解析结果（失败不抛异常，落库后由前端展示原因）——
+    error = _judge_parse_result(result)
 
-    # —— 6. 写回解析结果 ——
-    if result.parse_errors:
+    if error:
         contract.status = ContractStatus.PARSING_FAILED
         contract.parsed_content = ""
+        contract.parsed_sections = None
+        contract.parse_error = error
     else:
         contract.status = ContractStatus.PARSED
         contract.parsed_content = result.raw_text
         contract.parsed_sections = json.dumps(
             [s.__dict__ for s in result.sections], ensure_ascii=False
         )
+        contract.parse_error = None
+
     await db.commit()
     await db.refresh(contract)
     return contract
+
+
+def _judge_parse_result(result) -> str | None:
+    """判定解析结果是否可用；返回 None 表示通过，否则返回面向用户的原因"""
+    if result.parse_errors:
+        return "；".join(result.parse_errors)
+
+    if result.word_count < MIN_CONTRACT_CHARS:
+        return (
+            f"解析内容过短（仅提取到 {result.word_count} 字），"
+            f"请确认上传的是否为完整合同文件"
+        )
+
+    # PRD 明确排除英文合同：中文占比过低时阻断
+    if result.language != "zh-CN" and result.word_count > 50:
+        return "当前版本仅支持中文合同，检测到文本中中文字符占比过低，请上传中文合同"
+
+    return None
 
 
 async def list_by_user(

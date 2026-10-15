@@ -6,17 +6,21 @@ LLM 调用是 async httpx，不阻塞事件循环，可并发服务多个请求�
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.exceptions import NotFoundError, PermissionError, ValidationError, AppError
 from app.models.contract import Contract, ContractStatus
 from app.models.review import Review, RiskItem, OverallRisk, ReviewStatus, RiskLevel
 from app.models.category import RiskCategory
 from app.rag.review_chain import run_review
+
+settings = get_settings()
 
 
 async def create_review(
@@ -41,9 +45,18 @@ async def create_review(
         await db.delete(old)
         await db.flush()
 
-    # 3) 执行审查（检索 + LLM）
+    # 3) 执行审查（检索 + LLM），带超时保护
     try:
-        report = await run_review(contract.parsed_content)
+        report = await asyncio.wait_for(
+            run_review(contract.parsed_content),
+            timeout=settings.REVIEW_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise AppError(
+            f"审查超时（超过 {settings.REVIEW_TIMEOUT_SECONDS} 秒未完成），"
+            f"合同篇幅可能过长，请稍后在历史记录中重试",
+            code=504,
+        )
     except Exception as e:
         # 审查失败也留痕（不创建失败记录，直接抛错由前端提示重试）
         raise AppError(f"审查执行失败: {e}", code=502)

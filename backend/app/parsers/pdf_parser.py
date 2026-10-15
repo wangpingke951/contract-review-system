@@ -42,10 +42,19 @@ class PDFParser(ContractParser):
                     text = page.extract_text() or ""
                     raw_text_parts.append(text)
         except Exception as e:
-            errors.append(f"PDF 解析失败: {e}")
+            errors.append(self._describe_open_error(e))
             return StructuredContract(raw_text="", parse_errors=errors)
 
         raw_text = "\n".join(raw_text_parts)
+
+        # 无文本：多为扫描件/图片型 PDF，给出可操作的替代方案而不是笼统报错
+        if not raw_text.strip():
+            errors.append(
+                "未能从该 PDF 中提取到文字内容。若为扫描件或图片型 PDF，"
+                "请将页面导出为图片（PNG/JPG）后上传，系统会使用 OCR 识别"
+            )
+            return StructuredContract(raw_text="", parse_errors=errors)
+
         sections = self._split_sections(raw_text)
 
         chinese_ratio = detect_chinese_ratio(raw_text)
@@ -59,60 +68,64 @@ class PDFParser(ContractParser):
             parse_errors=errors,
         )
 
+    @staticmethod
+    def _describe_open_error(e: Exception) -> str:
+        """把底层异常翻译成用户能看懂、能行动的提示"""
+        name = type(e).__name__
+        low = f"{name} {e}".lower()
+        if "password" in low or "encrypt" in low:
+            return "该 PDF 已加密，系统无法读取，请提供解密版本后重新上传"
+        if isinstance(e, FileNotFoundError):
+            return "文件不存在或已被移动，请重新上传"
+        return f"PDF 解析失败：{e}"
+
     def _split_sections(self, raw_text: str) -> List[ContractSection]:
-        """按标题模式切分章节"""
+        """按标题模式切分章节
+
+        标题行计入所属 section 的内容，避免「标题紧接标题、中间无正文」时
+        section 因内容为空而被整体丢弃。
+        """
         lines = raw_text.split("\n")
         sections: List[ContractSection] = []
         current_title = "合同正文"
         current_level = SectionLevel.TOP
-        current_content_lines: List[str] = []
+        current_lines: List[str] = []
         char_offset = 0
 
-        # 预计算每行的全局字符偏移
-        line_offsets = []
-        acc = 0
-        for line in lines:
-            line_offsets.append(acc)
-            acc += len(line) + 1  # +1 for newline
-
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            # 检查是否匹配标题模式
-            matched_title = False
-            for pattern, level in TITLE_PATTERNS:
-                if re.match(pattern, stripped):
-                    # 保存上一个 section
-                    if current_content_lines:
-                        content = "\n".join(current_content_lines)
-                        sections.append(ContractSection(
-                            title=current_title,
-                            level=current_level,
-                            content=content,
-                            char_start=line_offsets[i - len(current_content_lines)],
-                            char_end=line_offsets[i - 1] + len(lines[i - 1]),
-                        ))
-                    current_title = stripped[:60]  # 截断过长的标题
-                    current_level = level
-                    current_content_lines = []
-                    matched_title = True
-                    break
-
-            if not matched_title:
-                current_content_lines.append(line)
-
-        # 最后一个 section
-        if current_content_lines:
-            content = "\n".join(current_content_lines)
+        def flush() -> None:
+            nonlocal char_offset
+            if not current_lines:
+                return
+            content = "\n".join(current_lines)
             sections.append(ContractSection(
                 title=current_title,
                 level=current_level,
                 content=content,
-                char_start=line_offsets[len(lines) - len(current_content_lines)],
-                char_end=len(raw_text),
+                char_start=char_offset,
+                char_end=char_offset + len(content),
             ))
+            char_offset += len(content) + 1
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            matched_level = None
+            for pattern, level in TITLE_PATTERNS:
+                if re.match(pattern, stripped):
+                    matched_level = level
+                    break
+
+            if matched_level is not None:
+                flush()
+                current_title = stripped[:60]
+                current_level = matched_level
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+
+        flush()
 
         # 如果没识别到任何标题（纯文本无条款格式），把整份文档作为一个 section
         if not sections:

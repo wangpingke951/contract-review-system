@@ -36,6 +36,8 @@ class Contract(Base):
     parsed_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 结构化章节 JSON（解析完成后写入）
     parsed_sections: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 解析失败原因（面向用户的可操作提示，成功时为 NULL）
+    parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     uploader_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
