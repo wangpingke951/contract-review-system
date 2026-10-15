@@ -14,7 +14,7 @@
 
       <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role]">
         <div class="bubble">
-          <span>{{ m.content }}</span>
+          <div class="md" v-html="renderMarkdown(m.content)"></div>
           <span v-if="m.streaming" class="cursor">▌</span>
         </div>
       </div>
@@ -40,6 +40,7 @@
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getConversation, getMessages, createChatSocket } from '@/api/chat'
+import { renderMarkdown } from '@/utils/markdown'
 import { useUserStore } from '@/stores/user'
 
 const props = defineProps({ reviewId: { type: Number, required: true } })
@@ -108,7 +109,8 @@ onUnmounted(() => { socket?.close() })
 <style scoped>
 .chat-panel {
   display: flex; flex-direction: column;
-  height: 100%; border: 1px solid #e5e7eb; border-radius: 10px;
+  height: 560px; max-height: 70vh;
+  border: 1px solid #e5e7eb; border-radius: 10px;
   background: #fff; overflow: hidden;
 }
 .chat-header {
@@ -123,12 +125,25 @@ onUnmounted(() => { socket?.close() })
 .msg.assistant { justify-content: flex-start; }
 .bubble {
   max-width: 85%; padding: 10px 14px; border-radius: 12px;
-  font-size: 14px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  font-size: 14px; line-height: 1.7; word-break: break-word;
 }
-.msg.user .bubble { background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; }
+.msg.user .bubble { background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; white-space: pre-wrap; }
 .msg.assistant .bubble { background: #f3f4f6; color: #1f2329; border-bottom-left-radius: 4px; }
 .cursor { animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* markdown 渲染节点（v-html 内容需 :deep） */
+.md :deep(h4) { margin: 10px 0 5px; font-size: 13px; font-weight: 500; }
+.md :deep(h4:first-child) { margin-top: 0; }
+.md :deep(p) { margin: 5px 0; }
+.md :deep(p:first-child) { margin-top: 0; }
+.md :deep(ul), .md :deep(ol) { margin: 5px 0; padding-left: 20px; }
+.md :deep(li) { margin: 2px 0; }
+.md :deep(strong) { font-weight: 500; }
+.md :deep(code) {
+  background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 3px;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px;
+}
 .chat-input {
   display: flex; gap: 10px; padding: 12px;
   border-top: 1px solid #e5e7eb; align-items: flex-end;
