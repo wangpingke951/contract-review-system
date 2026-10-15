@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>合同智能审查系统 PRD — RAG + 多模态 + 对话</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --paper: #ffffff;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --brand: #2563eb;
+    --brand-soft: #dbeafe;
+    --accent: #f59e0b;
+    --danger: #dc2626;
+    --ok: #16a34a;
+    --code: #0f172a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 48px 32px 96px; }
+
+  /* 封面 */
+  .cover {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+    color: #fff;
+    padding: 56px 48px;
+    border-radius: 16px;
+    margin-bottom: 40px;
+    box-shadow: 0 10px 30px rgba(37, 99, 235, .15);
+  }
+  .cover .tag {
+    display: inline-block;
+    background: rgba(255,255,255,.18);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+  }
+  .cover h1 {
+    font-size: 34px;
+    margin: 0 0 12px;
+    font-weight: 700;
+    letter-spacing: -.5px;
+  }
+  .cover .sub {
+    font-size: 16px;
+    opacity: .85;
+    margin-bottom: 28px;
+  }
+  .cover .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    font-size: 13px;
+    opacity: .8;
+  }
+  .cover .meta span b { opacity: 1; margin-right: 6px; font-weight: 600; }
+
+  /* 目录 */
+  .toc {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin-bottom: 36px;
+  }
+  .toc h2 { font-size: 14px; color: var(--muted); margin: 0 0 14px; letter-spacing: 1px; }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc li { margin: 6px 0; font-size: 14px; }
+  .toc a { color: var(--brand); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* 章节标题 */
+  h2.sec {
+    font-size: 24px;
+    font-weight: 700;
+    border-left: 4px solid var(--brand);
+    padding-left: 14px;
+    margin: 48px 0 20px;
+    scroll-margin-top: 24px;
+  }
+  h3.sub {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 28px 0 14px;
+    color: var(--text);
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 20px 0 10px;
+    color: var(--brand);
+  }
+
+  /* 段落与表格 */
+  p { margin: 8px 0; }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f1f5f9; font-weight: 600; color: var(--text); }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  /* 提示盒 */
+  .note {
+    border-left: 4px solid var(--accent);
+    background: #fffbeb;
+    padding: 12px 18px;
+    border-radius: 4px;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  .assumption {
+    border-left: 4px solid #8b5cf6;
+    background: #f5f3ff;
+    padding: 12px 18px;
+    border-radius: 4px;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  .tbd {
+    border-left: 4px solid var(--danger);
+    background: #fef2f2;
+    padding: 12px 18px;
+    border-radius: 4px;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  .scope-box {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .scope-box .col {
+    border-radius: 10px;
+    padding: 18px;
+    border: 1px solid var(--line);
+  }
+  .scope-box .col.p0 { background: #ecfdf5; border-color: #a7f3d0; }
+  .scope-box .col.p1 { background: #fffbeb; border-color: #fde68a; }
+  .scope-box .col.no { background: #f3f4f6; border-color: #d1d5db; }
+  .scope-box .col h4 { margin-top: 0; color: inherit; }
+
+  /* 流程示意 */
+  .flow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0;
+    padding: 16px;
+    background: #f1f5f9;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .flow .node {
+    background: var(--brand);
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .flow .arrow { color: var(--muted); }
+
+  /* FR 编号 */
+  .fr {
+    display: inline-block;
+    background: var(--brand-soft);
+    color: var(--brand);
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-right: 8px;
+  }
+
+  /* 权限矩阵 */
+  .perm td:first-child { font-weight: 600; }
+  .perm .ok { color: var(--ok); font-weight: 700; }
+  .perm .no { color: var(--muted); }
+
+  /* 页脚 */
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  code {
+    background: #f1f5f9;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- 封面 -->
+<div class="cover">
+  <div class="tag">PRODUCT REQUIREMENT DOCUMENT</div>
+  <h1>合同智能审查系统</h1>
+  <div class="sub">RAG + 多模态解析 + 对话式追问的一体化合同审查与风险预警平台</div>
+  <div class="meta">
+    <span><b>版本</b>v1.0 — MVP</span>
+    <span><b>深度</b>New Product / Heavy</span>
+    <span><b>日期</b>2026-10-15</span>
+    <span><b>状态</b>Draft</span>
+  </div>
+</div>
+
+<!-- 目录 -->
+<nav class="toc">
+  <h2>目 录</h2>
+  <ol>
+    <li><a href="#bg">背景与目标</a></li>
+    <li><a href="#scope">范围定义</a></li>
+    <li><a href="#model">角色与核心对象模型</a></li>
+    <li><a href="#fr">功能需求</a>
+      <ol type="a">
+        <li><a href="#fr-upload">合同上传与多模态解析</a></li>
+        <li><a href="#fr-rag">RAG 知识库与检索</a></li>
+        <li><a href="#fr-review">合同审查与风险报告</a></li>
+        <li><a href="#fr-chat">对话追问系统</a></li>
+        <li><a href="#fr-admin">管理后台（知识库管理）</a></li>
+      </ol>
+    </li>
+    <li><a href="#shared">共享规则与异常处理</a></li>
+    <li><a href="#open">开放问题</a></li>
+  </ol>
+</nav>
+
+<!-- ========== 1. 背景与目标 ========== -->
+<h2 class="sec" id="bg">1. 背景与目标</h2>
+
+<h3 class="sub">1.1 问题陈述</h3>
+<p>企业合同审查长期依赖法务人员逐条人工比对标准模板、历史判例和法规条文，存在以下痛点：</p>
+<ul>
+  <li><b>效率低</b>：一份 50 页合同的完整审查平均需要 2–4 小时，法务团队人均月处理量有限，业务高峰期大量合同积压。</li>
+  <li><b>一致性差</b>：不同法务对同类风险点的识别标准存在差异，且难以覆盖所有专业领域（如税务、劳动、知识产权）。</li>
+  <li><b>经验复用难</b>：企业积累的合同模板、已审合同、审查意见、行业法规分散在个人电脑或共享盘，新人难以快速取用。</li>
+  <li><b>非结构化输入</b>：扫描件、拍照合同、图片协议无法直接审查，需要额外 OCR 步骤。</li>
+</ul>
+
+<h3 class="sub">1.2 产品决策</h3>
+<p>基于以上问题，产品侧做出如下决策：</p>
+<ul>
+  <li>以 <b>RAG（检索增强生成）</b> 替代单一大模型，使审查结论可追溯、可对齐企业自有知识；</li>
+  <li>支持 <b>多模态输入</b>（PDF / Word / 扫描图片），覆盖企业常见合同来源；</li>
+  <li>提供 <b>对话式追问</b>，让用户对单个风险点深入展开（如「这个违约金条款对我司有什么不利？」）；</li>
+  <li>提供 <b>管理后台</b> 让业务方自主上传和维护知识库，减少对 IT 的依赖。</li>
+</ul>
+
+<h3 class="sub">1.3 预期可观察结果</h3>
+<ul>
+  <li>用户可在上传合同后 <b>[TBD，Assumption: 5–30 秒]</b> 内获得结构化审查报告；</li>
+  <li>审查报告中的每一个风险项均可点击查看其触发依据（对应知识库条目或合同原文位置）；</li>
+  <li>管理员可自行上传一份 Word 模板到知识库并在 <b>[TBD，Assumption: 1 分钟内]</b> 内生效；</li>
+  <li>用户可就同一审查会话发起至少 10 轮追问而无需重新上传合同。</li>
+</ul>
+
+<!-- ========== 2. 范围定义 ========== -->
+<h2 class="sec" id="scope">2. 范围定义</h2>
+
+<p>以下为本产品 <b>MVP（最小可发布版本）</b> 的范围边界。P0 构成最小完整旅程，P1 是紧随其后的增强，明确排除项避免协作分歧。</p>
+
+<div class="scope-box">
+  <div class="col p0">
+    <h4>🟢 P0 — 必做</h4>
+    <ul>
+      <li>用户登录（管理员 / 普通用户两级）</li>
+      <li>合同上传（PDF、DOCX、PNG/JPG 扫描件）</li>
+      <li>合同多模态解析（OCR + 结构化提取）</li>
+      <li>RAG 检索 + 结构化审查报告输出</li>
+      <li>对话追问（基于当前会话上下文）</li>
+      <li>管理员知识库上传、列表、删除</li>
+    </ul>
+  </div>
+  <div class="col p1">
+    <h4>🟡 P1 — 紧随其后</h4>
+    <ul>
+      <li>审查历史列表与重新查看</li>
+      <li>风险项确认 / 忽略 / 标记待改</li>
+      <li>知识库编辑（替换内容，而非仅删除再上传）</li>
+      <li>合同审查结果导出为 Word / PDF</li>
+      <li>知识库版本历史</li>
+    </ul>
+  </div>
+  <div class="col no">
+    <h4>⚪ 明确排除</h4>
+    <ul>
+      <li>合同在线编辑与修订</li>
+      <li>电子签署与数字印章</li>
+      <li>多企业 / 多租户协作</li>
+      <li>工作流审批（法务负责人确认）</li>
+      <li>企微 / 钉钉 / 邮件通知</li>
+      <li>英文合同审查 <span class="tbd-inline">[TBD]</span></li>
+    </ul>
+  </div>
+</div>
+
+<div class="assumption">
+  <b>[Assumption, TBD]</b> 所有审查能力默认面向中文合同。英文合同若需支持将作为独立增强项进入 roadmap。
+</div>
+
+<h3 class="sub">2.1 P0 最小完整旅程</h3>
+<div class="flow">
+  <span class="node">用户登录</span>
+  <span class="arrow">→</span>
+  <span class="node">上传合同</span>
+  <span class="arrow">→</span>
+  <span class="node">系统解析</span>
+  <span class="arrow">→</span>
+  <span class="node">RAG 检索</span>
+  <span class="arrow">→</span>
+  <span class="node">生成审查报告</span>
+  <span class="arrow">→</span>
+  <span class="node">对话追问</span>
+</div>
+
+<div class="flow">
+  <span class="node">管理员登录</span>
+  <span class="arrow">→</span>
+  <span class="node">上传知识文档</span>
+  <span class="arrow">→</span>
+  <span class="node">系统切块入库</span>
+  <span class="arrow">→</span>
+  <span class="node">知识库可用</span>
+</div>
+
+<h3 class="sub">2.2 核心失败的恢复路径</h3>
+<table>
+  <tr><th>失败场景</th><th>恢复路径</th></tr>
+  <tr><td>合同解析失败（图片质量不足 / 格式不支持）</td><td>用户重新上传；系统提示可能原因（如「图片模糊，请重新拍照」）</td></tr>
+  <tr><td>审查超时</td><td>返回已解析的合同结构，告知「审查尚未完成，请稍后在历史中查看」</td></tr>
+  <tr><td>知识库检索为空</td><td>系统使用基础通用规则输出审查，不阻断流程，并提示「知识库暂无匹配，建议管理员补充相关知识」</td></tr>
+  <tr><td>对话会话意外断开</td><td>用户重新进入该审查记录，会话历史完整保留，可继续追问</td></tr>
+</table>
+
+<!-- ========== 3. 角色与对象模型 ========== -->
+<h2 class="sec" id="model">3. 角色与核心对象模型</h2>
+
+<h3 class="sub">3.1 角色</h3>
+<table>
+  <tr><th>角色</th><th>核心目标</th><th>使用场景</th></tr>
+  <tr>
+    <td><b>普通用户</b>（法务、业务人员）</td>
+    <td>快速获得合同风险审查结论，并就疑点追问</td>
+    <td>上传合同 → 查看审查报告 → 对话追问</td>
+  </tr>
+  <tr>
+    <td><b>管理员</b>（知识运营 / IT）</td>
+    <td>维护企业知识库，保障审查质量基础</td>
+    <td>上传知识文档 → 管理知识库条目</td>
+  </tr>
+</table>
+
+<h3 class="sub">3.2 核心对象</h3>
+<table>
+  <tr><th>对象</th><th>说明</th><th>关键字段（产品视角）</th></tr>
+  <tr>
+    <td><b>合同文档</b></td>
+    <td>用户上传的待审查文件</td>
+    <td>文件名、文件类型、上传者、上传时间、当前状态、结构化内容</td>
+  </tr>
+  <tr>
+    <td><b>审查报告</b></td>
+    <td>系统对一份合同产出的结构化结论</td>
+    <td>对应合同、生成时间、风险项列表、总体风险等级、触发的知识条目 ID</td>
+  </tr>
+  <tr>
+    <td><b>风险项</b></td>
+    <td>报告中的单条风险提示</td>
+    <td>风险等级（高/中/低）、风险类别、合同原文片段、建议、依据知识条目</td>
+  </tr>
+  <tr>
+    <td><b>知识库条目</b></td>
+    <td>RAG 中的最小检索单元（由文档切块生成）</td>
+    <td>所属文档、文本内容、所属分类、上传时间</td>
+  </tr>
+  <tr>
+    <td><b>对话会话</b></td>
+    <td>围绕某一份审查报告的一次对话链</td>
+    <td>关联审查报告、创建时间、消息列表、是否活跃</td>
+  </tr>
+</table>
+
+<h3 class="sub">3.3 合同文档状态机</h3>
+<table>
+  <tr><th>当前状态</th><th>允许转为</th><th>触发事件</th></tr>
+  <tr><td><code>已上传</code></td><td><code>解析中</code>、<code>解析失败</code></td><td>用户上传文件</td></tr>
+  <tr><td><code>解析中</code></td><td><code>待审查</code>、<code>解析失败</code></td><td>系统后台处理</td></tr>
+  <tr><td><code>解析失败</code></td><td><code>已上传</code>（重新上传）</td><td>用户重新提交</td></tr>
+  <tr><td><code>待审查</code></td><td><code>审查中</code></td><td>用户点击「开始审查」</td></tr>
+  <tr><td><code>审查中</code></td><td><code>审查完成</code>、<code>审查失败</code></td><td>系统后台处理</td></tr>
+  <tr><td><code>审查失败</code></td><td><code>待审查</code>（重新触发）</td><td>用户点击重试</td></tr>
+  <tr><td><code>审查完成</code></td><td><code>—</code>（终态）</td><td>不可回退</td></tr>
+</table>
+
+<!-- ========== 4. 功能需求 ========== -->
+<h2 class="sec" id="fr">4. 功能需求</h2>
+
+<p>以下按模块展开。每个模块包含目的、触发、处理规则、结果、异常。所有规则均为产品行为定义，不涉及技术实现。</p>
+
+<!-- 4.1 -->
+<h3 class="sub" id="fr-upload">4.1 <span class="fr">FR-01</span>合同上传与多模态解析</h3>
+
+<h4>Purpose</h4>
+<p>让用户能够将企业常见来源的合同（电子文档、扫描件、拍照图片）转化为系统可理解的结构化文本，作为后续审查的基础。</p>
+
+<h4>Trigger</h4>
+<ul>
+  <li>任何已登录 <b>普通用户</b> 在「新建审查」页面点击上传区域或拖拽文件。</li>
+</ul>
+
+<h4>Layout</h4>
+<ul>
+  <li>上传区域：占据主视觉区，显示「点击或拖拽上传合同」+ 支持格式提示。</li>
+  <li>文件列表：显示本次上传的文件，包含文件名、格式、大小、上传进度条、解析状态。</li>
+</ul>
+
+<h4>Processing Rules</h4>
+<table>
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td>支持格式</td><td>PDF、DOCX、PNG、JPG。<b>[Assumption, TBD]</b> 最大单文件 50MB。</td></tr>
+  <tr><td>文件校验</td><td>超出格式或大小限制 → 阻止上传并提示具体原因。</td></tr>
+  <tr><td>解析流程</td><td>PDF/DOCX → 直接抽取文本 + 版式结构；PNG/JPG → OCR 识别文本后结构化。</td></tr>
+  <tr><td>解析结果</td><td>按「标题 → 章节 → 条款 → 列表项」层级组织，原文可回溯。</td></tr>
+  <tr><td>批量上传</td><td>允许一次上传 ≤ <b>[TBD, Assumption: 5]</b> 个文件，逐个独立解析。</td></tr>
+</table>
+
+<h4>Result and State Change</h4>
+<ul>
+  <li>解析成功 → 合同状态变为 <code>待审查</code>，并显示「预览」按钮。</li>
+  <li>用户可点击预览查看解析后的结构化文本，确认无误后点击「开始审查」。</li>
+</ul>
+
+<h4>Exceptions</h4>
+<table>
+  <tr><th>异常场景</th><th>产品行为</th></tr>
+  <tr><td>图片模糊 / 手写 / 倾斜严重</td><td>标记 <code>解析失败</code>，提示「图片识别失败，建议重新拍照或提供清晰扫描件」，允许用户重新上传。</td></tr>
+  <tr><td>PDF 加密</td><td>阻止解析并提示「该 PDF 已加密，请提供解密版本」。</td></tr>
+  <tr><td>文件无有效合同文本</td><td>标记 <code>解析失败</code>，提示「未能从文件中识别出有效合同文本」。</td></tr>
+  <tr><td>用户中途关闭页面</td><td>已上传但未完成解析的文件保留 <b>[TBD, Assumption: 24 小时]</b>，重新打开后可继续。</td></tr>
+</table>
+
+<!-- 4.2 -->
+<h3 class="sub" id="fr-rag">4.2 <span class="fr">FR-02</span>RAG 知识库与检索</h3>
+
+<h4>Purpose</h4>
+<p>将企业自有知识（合同模板、历史判例、法规条文、审查指引）转化为可被检索的条目，作为审查结论的依据。</p>
+
+<h4>Knowledge Base 结构 <span class="tbd-inline">[Assumption, TBD]</span></h4>
+<table>
+  <tr><th>知识分类</th><th>示例</th></tr>
+  <tr><td>合同模板</td><td>销售合同模板、采购合同模板、劳动合同模板</td></tr>
+  <tr><td>审查指引</td><td>法务部《合同审查要点 v2.3》、《民法典合同编关键条款》</td></tr>
+  <tr><td>历史判例</td><td>本企业过往诉讼判决、典型纠纷处理记录</td></tr>
+  <tr><td>法规条文</td><td>与合同相关的最新法律法规、司法解释</td></tr>
+</table>
+
+<h4>Processing Rules（检索行为）</h4>
+<table>
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td>触发时机</td><td>用户点击「开始审查」后，系统根据解析出的合同内容自动生成查询。</td></tr>
+  <tr><td>检索范围</td><td>默认检索全部已启用的知识库条目。<b>[TBD]</b> 是否支持按分类限定。</td></tr>
+  <tr><td>返回内容</td><td>每一个风险判断均附带检索命中的知识条目（展示其来源文档和文本片段）。</td></tr>
+  <tr><td>检索为空</td><td>不阻断审查，系统切换为通用规则库继续输出，并在报告顶部提示「部分风险项未命中企业知识库，建议管理员补充」。</td></tr>
+</table>
+
+<h4>共享规则 — 知识条目切块</h4>
+<ul>
+  <li>单条知识库条目目标长度：<b>[TBD, Assumption: 500–1000 中文字]</b>；</li>
+  <li>切块应尽量保持条款/章节完整，不截断关键法律条文；</li>
+  <li>切块完成后方可进入「已启用」状态并被检索。</li>
+</ul>
+
+<!-- 4.3 -->
+<h3 class="sub" id="fr-review">4.3 <span class="fr">FR-03</span>合同审查与风险报告</h3>
+
+<h4>Purpose</h4>
+<p>将解析后的合同文本与知识库进行比对，输出一份结构化、可追溯的风险审查报告。</p>
+
+<h4>Trigger</h4>
+<ul>
+  <li>用户在合同预览页点击「开始审查」；</li>
+  <li>或在历史列表中对 <code>审查失败</code> 的合同点击「重新审查」。</li>
+</ul>
+
+<h4>Layout</h4>
+审查报告页面分为三栏：
+<ul>
+  <li><b>左侧（合同原文导航）</b>：章节树状结构，点击跳转到中间原文位置。</li>
+  <li><b>中间（合同原文 + 高亮）</b>：合同全文，命中风险的条款以红/黄/绿色背景标注风险等级。</li>
+  <li><b>右侧（风险项列表）</b>：按风险等级分组（高 / 中 / 低），点击某一风险项 → 中间原文自动定位 + 底部展开详细建议和依据。</li>
+</ul>
+
+<h4>Processing Rules</h4>
+<table>
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td>总体风险等级</td><td>由高风险项数量决定：≥3 条高风险 → 总体「高风险」；1–2 条 → 「中风险」；0 条 → 「低风险」。<b>[Assumption, TBD]</b></td></tr>
+  <tr><td>风险类别</td><td>条款缺失、金额异常、期限风险、主体资格、违约责任、知识产权、保密条款、不可抗力、争议解决。<b>[TBD]</b> 可由管理员扩展。</td></tr>
+  <tr><td>每条风险项输出</td><td>风险等级、风险类别、合同原文片段、问题说明、修改建议、触发依据（知识条目来源文档 + 文本片段）。</td></tr>
+  <tr><td>正向发现</td><td>对合同中与企业模板一致、保护本司利益的条款，以「✓」标记作为正向参考。</td></tr>
+</table>
+
+<h4>Result and State Change</h4>
+<ul>
+  <li>生成审查报告，合同状态变为 <code>审查完成</code>；</li>
+  <li>审查报告永久关联该合同，用户可随时查看；</li>
+  <li>系统自动创建一个空的对话会话，引导用户开始追问。</li>
+</ul>
+
+<h4>Exceptions</h4>
+<table>
+  <tr><th>异常场景</th><th>产品行为</th></tr>
+  <tr><td>审查超时 <b>[TBD, Assumption: 120 秒]</b></td><td>返回已完成的部分风险项，报告顶部标记「本次审查可能不完整，建议稍后重试」。</td></tr>
+  <tr><td>解析内容过少（<50 字）</td><td>阻止进入审查环节，提示「合同解析内容过短，请检查文件是否为完整合同」。</td></tr>
+</table>
+
+<!-- 4.4 -->
+<h3 class="sub" id="fr-chat">4.4 <span class="fr">FR-04</span>对话追问系统</h3>
+
+<h4>Purpose</h4>
+<p>让用户围绕某一份审查报告进行自然语言追问，获取单个风险点的深入解释、对比和建议，而无需重新上传合同。</p>
+
+<h4>Trigger</h4>
+<ul>
+  <li>用户在审查报告页点击右下角对话图标；</li>
+  <li>或在历史列表中进入已有会话继续对话。</li>
+</ul>
+
+<h4>Layout</h4>
+<ul>
+  <li>对话面板位于审查报告页右侧（或移动端底部弹出）；</li>
+  <li>消息列表以气泡形式呈现：用户消息靠右，系统回复靠左；</li>
+  <li>输入框底部固定，支持「发送」按钮和 Enter 快捷键。</li>
+  <li>系统回复中若引用了合同原文或知识库条目，以可点击卡片形式展示。</li>
+</ul>
+
+<h4>Processing Rules</h4>
+<table>
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td>上下文范围</td><td>每次追问时，系统同时参考：当前合同全文 + 当前审查报告全部风险项 + 本会话历史消息。</td></tr>
+  <tr><td>引用来源</td><td>系统回复中涉及合同或知识库内容时，必须展示其来源（如「合同第 5.2 条」或「知识库：销售合同模板 v1.2」）。</td></tr>
+  <tr><td>建议边界</td><td>当用户追问法律定性类问题（如「这个条款合法吗？」）时，系统明确声明「本建议仅供参考，不构成法律意见」。</td></tr>
+  <tr><td>会话保留</td><td>会话永久保留，关联对应审查报告。</td></tr>
+</table>
+
+<h4>Result and State Change</h4>
+<ul>
+  <li>每条用户消息和系统回复均追加到当前会话；</li>
+  <li>会话最后活跃时间更新；</li>
+  <li>在历史列表中，该审查记录显示「有 N 条追问」。</li>
+</ul>
+
+<h4>Exceptions</h4>
+<table>
+  <tr><th>异常场景</th><th>产品行为</th></tr>
+  <tr><td>追问超时 <b>[TBD, Assumption: 30 秒]</b></td><td>返回部分回复或提示「回复超时，请重试」。</td></tr>
+  <tr><td>当前会话引用的合同已被删除</td><td>不允许进入会话，提示「该合同已不存在，会话已失效」。</td></tr>
+  <tr><td>用户连续发送空消息</td><td>忽略空消息，不追加到会话。</td></tr>
+</table>
+
+<!-- 4.5 -->
+<h3 class="sub" id="fr-admin">4.5 <span class="fr">FR-05</span>管理后台（知识库管理）</h3>
+
+<h4>Purpose</h4>
+<p>让管理员无需依赖开发即可自主上传、管理和维护企业知识库，保障 RAG 检索质量。</p>
+
+<h4>Trigger</h4>
+<ul>
+  <li>管理员登录后，点击顶部导航「知识库」进入管理后台。</li>
+</ul>
+
+<h4>Layout</h4>
+<ul>
+  <li>顶部：「上传知识文档」主按钮 + 分类筛选下拉框 + 搜索框；</li>
+  <li>主体：知识文档列表，卡片式展示（文档名、分类、上传者、上传时间、切块数、当前状态、操作）；</li>
+  <li>操作列：查看详情、删除、（P1：编辑）。</li>
+</ul>
+
+<h4>Processing Rules</h4>
+<table>
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td>上传格式</td><td>DOCX、PDF、TXT（纯文本）。<b>[TBD]</b> 是否支持 Markdown。</td></tr>
+  <tr><td>分类必填</td><td>上传时必须选择一个知识分类（见 FR-02）。</td></tr>
+  <tr><td>切块状态</td><td>上传后文档进入「切块中」，完成后自动转为「已启用」。切块失败 → 「切块失败」，管理员可删除后重传。</td></tr>
+  <tr><td>删除行为</td><td>删除文档时其下属所有知识条目同时从检索中移除。<b>[Assumption, TBD]</b> 删除不影响历史审查报告中已引用该条目的风险项展示（保证历史报告可追溯）。</td></tr>
+  <tr><td>默认启用</td><td>切块完成后默认「已启用」，立即进入检索范围。<b>[TBD]</b> 是否需要管理员手动点击「启用」。</td></tr>
+</table>
+
+<h4>Result and State Change</h4>
+<ul>
+  <li>上传成功 → 列表中出现新文档，状态为「切块中」；</li>
+  <li>切块完成 → 状态变为「已启用」，可被新的审查任务检索；</li>
+  <li>删除 → 文档从列表移除，其条目不再参与后续检索。</li>
+</ul>
+
+<h4>Exceptions</h4>
+<table>
+  <tr><th>异常场景</th><th>产品行为</th></tr>
+  <tr><td>上传格式不支持</td><td>阻止上传并提示具体支持格式。</td></tr>
+  <tr><td>切块超时 <b>[TBD]</b></td><td>标记「切块失败」，管理员可重试或删除。</td></tr>
+  <tr><td>非管理员访问</td><td>普通用户点击「知识库」 → 重定向到审查首页并提示「无权限访问」。</td></tr>
+</table>
+
+<!-- ========== 5. 共享规则 ========== -->
+<h2 class="sec" id="shared">5. 共享规则与异常处理</h2>
+
+<h3 class="sub">5.1 权限矩阵</h3>
+<table class="perm">
+  <tr><th>功能</th><th>普通用户</th><th>管理员</th></tr>
+  <tr><td>上传合同并发起审查</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+  <tr><td>查看自己的审查报告</td><td class="ok">✓</td><td class="ok">✓（全部）</td></tr>
+  <tr><td>发起对话追问</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+  <tr><td>上传知识文档</td><td class="no">✗</td><td class="ok">✓</td></tr>
+  <tr><td>删除知识文档</td><td class="no">✗</td><td class="ok">✓</td></tr>
+  <tr><td>登录 / 退出</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+</table>
+
+<div class="assumption">
+  <b>[Assumption, TBD]</b> MVP 阶段管理员可查看全部用户的审查报告，普通用户仅可查看自己的。若业务需要「部门隔离」，将进入 P2 规划。
+</div>
+
+<h3 class="sub">5.2 数据保留</h3>
+<ul>
+  <li>合同文档：<b>[TBD, Assumption: 永久保留]</b> 直到管理员手动删除；</li>
+  <li>审查报告、风险项、对话会话：与合同文档共存亡；</li>
+  <li>知识文档及其切块：永久保留直到管理员删除。</li>
+</ul>
+
+<h3 class="sub">5.3 审计日志 <span class="tbd-inline">[Assumption, TBD]</span></h3>
+<p>以下操作记录审计日志，管理员可在后台查看（P1 功能）：</p>
+<ul>
+  <li>合同上传、开始审查、重新审查；</li>
+  <li>知识文档上传、删除；</li>
+  <li>管理员账号登录 / 退出。</li>
+</ul>
+
+<h3 class="sub">5.4 并发与排队</h3>
+<ul>
+  <li>当多个用户同时触发审查时，系统按提交顺序排队处理，并显示当前队列位置 <b>[TBD]</b>。</li>
+  <li>审查任务在后台异步执行，用户可离开页面，完成后在历史列表看到结果。</li>
+</ul>
+
+<!-- ========== 6. 开放问题 ========== -->
+<h2 class="sec" id="open">6. 开放问题</h2>
+<p>以下问题会实质性影响产品行为，需在进入开发前由产品 / 业务方决策。</p>
+
+<table>
+  <tr><th>编号</th><th>问题</th><th>影响范围</th><th>建议决策时点</th></tr>
+  <tr><td>Q1</td><td>是否需要审查结果审批流（法务负责人确认后才算最终报告）？</td><td>新增角色、状态机、通知</td><td>P0 前决策，否则走 P1</td></tr>
+  <tr><td>Q2</td><td>知识库是否需要版本历史（更新旧文档而非删除重传）？</td><td>管理后台功能</td><td>P1 前决策</td></tr>
+  <tr><td>Q3</td><td>风险类别是否由法务部预定义并可自行增删？</td><td>管理员可配置项</td><td>P0 前决策</td></tr>
+  <tr><td>Q4</td><td>系统部署环境（公有云 / 私有云 / 内网）？这影响数据安全和模型部署方案。</td><td>部署和合规</td><td>开发前必须决策</td></tr>
+  <tr><td>Q5</td><td>是否需要对接企业 IM（企微 / 钉钉）在审查完成后推送通知？</td><td>通知模块</td><td>P1 前决策</td></tr>
+  <tr><td>Q6</td><td>MVP 是否支持多语言合同审查？</td><td>解析与模型选择</td><td>P0 前决策</td></tr>
+</table>
+
+<footer>
+  合同智能审查系统 · PRD v1.0 (MVP) · 2026-10-15 · Draft
+</footer>
+
+</div>
+</body>
+</html>

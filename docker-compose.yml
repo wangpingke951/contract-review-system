@@ -1,0 +1,129 @@
+# docker-compose.yml — MVP 本地一键启动
+# 按技术架构设计文档 v1.0 实现
+# Phase 1 只验证基础设施（mysql/redis/chromadb）的健康状态
+# api-backend / celery-worker / frontend 会在后续 Phase 2/3 有代码后才能正常启动
+
+services:
+  # ——— MySQL 8.0（强制 utf8mb4，用于中文合同存储）———
+  mysql:
+    image: mysql:8.0
+    container_name: cr-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: contract_review
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=caching_sha2_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [contract-net]
+
+  # ——— Redis 7（Celery Broker + 缓存层）———
+  redis:
+    image: redis:7-alpine
+    container_name: cr-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [contract-net]
+
+  # ——— ChromaDB standalone server ———
+  # 为什么不用 embedded？因为 api-backend 和 celery-worker 两个容器会并发访问向量库，
+  # embedded 底层用 SQLite，并发写入会锁死或损坏数据。必须跑 standalone server。
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: cr-chroma
+    restart: unless-stopped
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=TRUE
+    ports:
+      - "8001:8000"   # 宿主机用 8001，容器内 8000；Docker 网络内通过 chromadb:8000 访问
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [contract-net]
+
+  # ——— FastAPI 后端（Phase 2 才有代码）———
+  api-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cr-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/uploads:/app/data/uploads
+    depends_on:
+      mysql:    { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      chromadb: { condition: service_healthy }
+    networks: [contract-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ——— Celery Worker（Phase 2 才有代码）———
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cr-worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./data/uploads:/app/data/uploads
+    depends_on:
+      mysql:    { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      chromadb: { condition: service_healthy }
+    networks: [contract-net]
+    command: celery -A app.celery_tasks.app worker --loglevel=info
+
+  # ——— Vue 前端（Phase 3 才有代码）———
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cr-fe
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - api-backend
+    networks: [contract-net]
+
+volumes:
+  mysql_data:     # MySQL 业务数据（含 utf8mb4 字符集）
+  redis_data:     # Redis 持久化（Celery 任务结果）
+  chroma_data:    # ChromaDB 向量数据（standalone server 持久化）
+
+networks:
+  contract-net:
+    driver: bridge

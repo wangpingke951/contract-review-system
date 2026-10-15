@@ -1,0 +1,13 @@
+# backend/.dockerignore — 避免把无关文件打进镜像
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env  # 真实密钥不进镜像，docker-compose 用 env_file 注入
+data/uploads/  # 上传目录通过 volume 挂载
+data/chroma/
+.git/
+.gitignore
+*.md

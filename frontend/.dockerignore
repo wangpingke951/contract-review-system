@@ -1,0 +1,8 @@
+# frontend/.dockerignore — 避免把 node_modules / dist 打进构建上下文
+node_modules/
+dist/
+.env.local
+.env.*.local
+.git/
+.gitignore
+*.md
