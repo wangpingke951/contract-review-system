@@ -8,6 +8,7 @@ const routes = [
 
   // —— 主流程（登录后）——
   { path: '/', name: 'Home', component: () => import('@/views/Home.vue') },
+  { path: '/assistant', name: 'Assistant', component: () => import('@/views/Assistant.vue') },
   {
     path: '/reviews/contract/:contractId',
     name: 'ReviewByContract',

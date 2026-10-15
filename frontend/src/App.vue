@@ -24,6 +24,10 @@
             <el-icon><HomeFilled /></el-icon>
             <span>首页 / 审查</span>
           </el-menu-item>
+          <el-menu-item index="/assistant">
+            <el-icon><ChatDotRound /></el-icon>
+            <span>法律问答</span>
+          </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/admin/knowledge">
             <el-icon><FolderOpened /></el-icon>
             <span>知识库管理</span>

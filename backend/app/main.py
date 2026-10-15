@@ -37,6 +37,7 @@ import app.models.contract      # noqa: F401
 import app.models.review        # noqa: F401
 import app.models.conversation  # noqa: F401
 import app.models.category      # noqa: F401
+import app.models.assistant     # noqa: F401
 
 
 # ——— lifespan（启动/关闭钩子）———
@@ -146,13 +147,16 @@ from app.routers import contracts as contracts_router     # noqa: E402
 from app.routers import reviews as reviews_router         # noqa: E402
 from app.routers import chat as chat_router               # noqa: E402
 from app.routers import admin as admin_router             # noqa: E402
+from app.routers import assistant as assistant_router     # noqa: E402
 
 app.include_router(auth_router.router,       prefix="/api/auth",      tags=["认证"])
 app.include_router(contracts_router.router,  prefix="/api/contracts", tags=["合同"])
 app.include_router(reviews_router.router,    prefix="/api/reviews",   tags=["审查"])
 app.include_router(chat_router.router,       prefix="/api/chat",      tags=["对话"])
 app.include_router(admin_router.router,      prefix="/api/admin",     tags=["管理后台"])
+app.include_router(assistant_router.router,  prefix="/api/assistant", tags=["法律问答"])
 app.include_router(chat_router.ws_router,                             tags=["对话WebSocket"])
+app.include_router(assistant_router.ws_router,                        tags=["法律问答WebSocket"])
 
 
 # ——— 健康检查 ———
