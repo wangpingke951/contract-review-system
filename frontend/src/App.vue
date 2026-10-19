@@ -40,6 +40,10 @@
             <el-icon><Collection /></el-icon>
             <span>审查模板</span>
           </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/admin/model-config">
+            <el-icon><Setting /></el-icon>
+            <span>模型配置</span>
+          </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/admin/categories">
             <el-icon><CollectionTag /></el-icon>
             <span>风险类别</span>

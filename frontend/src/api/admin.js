@@ -57,3 +57,20 @@ export function listAuditLogs({ page = 1, size = 50, action = '' } = {}) {
 export function getUsageStats(days = 7) {
   return request.get('/admin/usage-stats', { params: { days } })
 }
+
+// ——— 模型配置 ———
+export function getModelConfig() {
+  return request.get('/admin/model-config')
+}
+
+export function updateModelConfig(data) {
+  return request.put('/admin/model-config', data)
+}
+
+export function testModelConnection(data) {
+  return request.post('/admin/model-config/test', data, { timeout: 40000 })
+}
+
+export function listModelProviders() {
+  return request.get('/admin/model-config/providers')
+}

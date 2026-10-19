@@ -20,6 +20,8 @@ from app.core.database import Base
 # 动作枚举值（数据库里存字符串，新增动作无需改表结构）
 ACTION_CONTRACT_UPLOAD = "contract.upload"
 ACTION_CONTRACT_DELETE = "contract.delete"
+ACTION_CONTRACT_REPARSE = "contract.reparse"
+ACTION_CONTRACT_REPLACE = "contract.replace"
 ACTION_REVIEW_CREATE = "review.create"
 ACTION_REVIEW_RETRY = "review.retry"
 ACTION_REVIEW_ITEM_HANDLE = "review.item_handle"
@@ -33,6 +35,8 @@ ACTION_AUTH_LOGIN = "auth.login"
 ACTION_LABELS = {
     ACTION_CONTRACT_UPLOAD: "上传合同",
     ACTION_CONTRACT_DELETE: "删除合同",
+    ACTION_CONTRACT_REPARSE: "重新解析合同",
+    ACTION_CONTRACT_REPLACE: "重传并解析",
     ACTION_REVIEW_CREATE: "发起审查",
     ACTION_REVIEW_RETRY: "重新审查",
     ACTION_REVIEW_ITEM_HANDLE: "处置风险项",

@@ -21,6 +21,7 @@ const routes = [
   { path: '/admin/knowledge', name: 'KnowledgeManage', component: () => import('@/views/admin/KnowledgeManage.vue'), meta: { admin: true } },
   { path: '/admin/categories', name: 'CategoryManage', component: () => import('@/views/admin/CategoryManage.vue'), meta: { admin: true } },
   { path: '/admin/templates', name: 'TemplateManage', component: () => import('@/views/admin/TemplateManage.vue'), meta: { admin: true } },
+  { path: '/admin/model-config', name: 'ModelConfig', component: () => import('@/views/admin/ModelConfig.vue'), meta: { admin: true } },
   { path: '/admin/audit', name: 'AuditLog', component: () => import('@/views/admin/AuditLog.vue'), meta: { admin: true } },
   { path: '/admin/usage', name: 'UsageStats', component: () => import('@/views/admin/UsageStats.vue'), meta: { admin: true } },
 

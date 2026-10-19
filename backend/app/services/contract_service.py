@@ -38,45 +38,18 @@ _TYPE_MAP = {
 }
 
 
-async def upload_and_parse(
-    db: AsyncSession,
-    file: UploadFile,
-    uploader_id: int,
-    base: Optional[Contract] = None,
-) -> Contract:
-    """
-    上传 + 解析（同步执行）
-
-    流程：
-    1. 校验文件类型和大小（不通过 → 抛 ValidationError，文件不入库）
-    2. 保存到 UPLOAD_DIR/{uploader_id}/{timestamp}_{safe_filename}
-    3. 校验文件真实类型（魔数，防改扩展名绕过）
-    4. 调 parser 解析
-    5. 判定结果：解析报错 / 内容过少 / 非中文 → status=parsing_failed + parse_error
-    6. 写 DB（base 不为空时作为该合同的新版本）
-
-    设计说明：解析类失败**不再抛异常**，而是落库并随正常响应返回。
-    这样批量上传时单个文件失败不会中断整批，前端也能逐条展示失败原因。
-    """
-    # —— 1. 校验 ——
+async def _save_contract_file(file: UploadFile, uploader_id: int) -> tuple[str, str, str]:
+    """校验（扩展名 / 大小 / 魔数）并落盘，返回 (filename, file_path, ext)"""
     filename = file.filename or "unnamed"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     allowed = supported_extensions()
     if ext not in allowed:
-        raise ValidationError(
-            f"不支持的文件类型 .{ext}，允许: {sorted(allowed)}"
-        )
+        raise ValidationError(f"不支持的文件类型 .{ext}，允许: {sorted(allowed)}")
 
-    MAX_BYTES = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    # 先读一下检查大小（UploadFile 没有内置 size 属性）
     content = await file.read()
-    if len(content) > MAX_BYTES:
-        raise ValidationError(
-            f"文件超过 {settings.MAX_UPLOAD_SIZE_MB}MB 上限"
-        )
-    await file.seek(0)
+    if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise ValidationError(f"文件超过 {settings.MAX_UPLOAD_SIZE_MB}MB 上限")
 
-    # —— 2. 保存 ——
     upload_dir = os.path.join(settings.UPLOAD_DIR, str(uploader_id))
     os.makedirs(upload_dir, exist_ok=True)
     safe_filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.path.basename(filename)}"
@@ -84,39 +57,21 @@ async def upload_and_parse(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # —— 3. 真实类型校验（魔数）——
     from app.core import file_guard
     try:
         file_guard.verify(file_path, ext)
     except ValidationError:
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
+        _remove_file(file_path)
         raise
+    return filename, file_path, ext
 
-    # —— 4. 写 DB（初始状态 parsing）——
-    file_type = _TYPE_MAP.get(ext, ext)
-    contract = Contract(
-        filename=filename,
-        file_type=file_type,
-        file_path=file_path,
-        status=ContractStatus.PARSING,
-        uploader_id=uploader_id,
-        version=(base.version + 1) if base else 1,
-        root_contract_id=((base.root_contract_id or base.id) if base else None),
-        parent_contract_id=(base.id if base else None),
-    )
-    db.add(contract)
-    await db.flush()  # 拿到 contract.id
 
-    # —— 5. 解析 ——
-    parser = get_parser(filename)
+async def _apply_parse(contract: Contract, file_path: str) -> None:
+    """解析文件并把结果写进 contract 对象（不 commit）"""
+    parser = get_parser(contract.filename)
     result = await parser.parse(file_path)
 
-    # —— 6. 判定解析结果（失败不抛异常，落库后由前端展示原因）——
     error = _judge_parse_result(result)
-
     if error:
         contract.status = ContractStatus.PARSING_FAILED
         contract.parsed_content = ""
@@ -130,7 +85,112 @@ async def upload_and_parse(
         )
         contract.parse_error = None
 
+
+def _remove_file(path: str | None) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+async def upload_and_parse(
+    db: AsyncSession,
+    file: UploadFile,
+    uploader_id: int,
+    base: Optional[Contract] = None,
+) -> Contract:
+    """
+    上传 + 解析（同步执行）
+
+    流程：校验并落盘 → 建记录 → 解析 → 判定结果 → 落库
+    解析类失败**不抛异常**，而是落库并随正常响应返回（status=parsing_failed + parse_error），
+    这样批量上传时单个文件失败不会中断整批，前端也能逐条展示原因。
+    """
+    filename, file_path, ext = await _save_contract_file(file, uploader_id)
+
+    contract = Contract(
+        filename=filename,
+        file_type=_TYPE_MAP.get(ext, ext),
+        file_path=file_path,
+        status=ContractStatus.PARSING,
+        uploader_id=uploader_id,
+        version=(base.version + 1) if base else 1,
+        root_contract_id=((base.root_contract_id or base.id) if base else None),
+        parent_contract_id=(base.id if base else None),
+    )
+    db.add(contract)
+    await db.flush()  # 拿到 contract.id
+
+    await _apply_parse(contract, file_path)
+
     await db.commit()
+    await db.refresh(contract)
+    return contract
+
+
+async def reparse(
+    db: AsyncSession,
+    contract_id: int,
+    user_id: int,
+    is_admin: bool = False,
+) -> Contract:
+    """
+    原地重新解析已保存的原始文件。
+
+    适用场景：之前因为 OCR / 多模态模型未配置、解析器临时异常导致失败，
+    配置修好后无需重新上传，直接重试即可。
+    """
+    from app.core.exceptions import PermissionError
+
+    contract = await get_by_id(db, contract_id)
+    if not contract:
+        raise NotFoundError("合同不存在")
+    if not is_admin and contract.uploader_id != user_id:
+        raise PermissionError("无权重新解析此合同")
+    if not contract.file_path or not os.path.exists(contract.file_path):
+        raise ValidationError("原始文件已不存在，请重新上传该合同")
+    if contract.status == ContractStatus.REVIEWING:
+        raise ValidationError("该合同正在审查中，请稍后再试")
+
+    await _apply_parse(contract, contract.file_path)
+    await db.commit()
+    await db.refresh(contract)
+    return contract
+
+
+async def replace_file(
+    db: AsyncSession,
+    contract_id: int,
+    file: UploadFile,
+    user_id: int,
+    is_admin: bool = False,
+) -> Contract:
+    """
+    用新文件替换该合同的原始文件并重新解析（解析失败后重传）。
+
+    与「上传新版本」的区别：不新增记录、版本号不变，列表里不会多出一条。
+    """
+    from app.core.exceptions import PermissionError
+
+    contract = await get_by_id(db, contract_id)
+    if not contract:
+        raise NotFoundError("合同不存在")
+    if not is_admin and contract.uploader_id != user_id:
+        raise PermissionError("无权替换此合同的文件")
+    if contract.status == ContractStatus.REVIEWING:
+        raise ValidationError("该合同正在审查中，请稍后再试")
+
+    filename, file_path, ext = await _save_contract_file(file, contract.uploader_id)
+    old_path = contract.file_path
+
+    contract.filename = filename
+    contract.file_path = file_path
+    contract.file_type = _TYPE_MAP.get(ext, ext)
+    await _apply_parse(contract, file_path)
+
+    await db.commit()
+    _remove_file(old_path)
     await db.refresh(contract)
     return contract
 

@@ -36,9 +36,10 @@
             :data="groups[t.key] || []"
             v-loading="loading"
             style="width:100%"
+            row-key="contract_id"
             @selection-change="(rows) => (selected = rows.map((r) => r.contract_id))"
           >
-            <el-table-column v-if="t.key === 'pending'" type="selection" width="46" />
+            <el-table-column v-if="t.key === 'pending'" type="selection" width="46" reserve-selection />
             <el-table-column prop="filename" label="合同" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ row.filename }}
@@ -71,20 +72,54 @@
             <el-table-column label="时间" width="160">
               <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
-                <el-button v-if="row.review_id" link type="primary" @click="$router.push(`/reviews/${row.review_id}`)">
-                  查看报告
-                </el-button>
-                <el-button v-else-if="row.contract_status === 'parsed'" link type="success" @click="reviewOne(row)">
-                  开始审查
-                </el-button>
+                <!-- 审查完成：看报告 -->
+                <el-button
+                  v-if="row.review_status === 'done'" link type="primary"
+                  @click="$router.push(`/reviews/${row.review_id}`)"
+                >查看报告</el-button>
+
+                <!-- 审查失败：重试 -->
+                <el-button
+                  v-else-if="row.review_status === 'failed'" link type="warning"
+                  :loading="busyId === row.contract_id"
+                  @click="retryOne(row)"
+                >重试审查</el-button>
+
+                <!-- 已解析待审查 -->
+                <el-button
+                  v-else-if="row.contract_status === 'parsed'" link type="success"
+                  :loading="busyId === row.contract_id"
+                  @click="reviewOne(row)"
+                >开始审查</el-button>
+
+                <!-- 解析失败：重解析 / 重传 -->
+                <template v-else-if="row.contract_status === 'parsing_failed'">
+                  <el-button
+                    link type="warning" :loading="busyId === row.contract_id"
+                    @click="reparseOne(row)"
+                  >重新解析</el-button>
+                  <el-button link type="primary" @click="triggerReplace(row)">重新上传</el-button>
+                </template>
               </template>
             </el-table-column>
             <template #empty><el-empty :description="`暂无${t.label}任务`" :image-size="70" /></template>
           </el-table>
+
+          <!-- 解析失败时给出可操作提示 -->
+          <el-alert
+            v-if="t.key === 'parse_failed' && (groups.parse_failed || []).length"
+            type="info" :closable="false" show-icon style="margin-top:10px"
+            title="解析失败常见原因：文件损坏 / 非中文合同 / 图片未配置多模态模型。可先点「重新解析」（配置已修复时无需重传），仍失败则「重新上传」替换文件。"
+          />
         </el-tab-pane>
       </el-tabs>
+
+      <input
+        ref="replaceInput" type="file" style="display:none"
+        accept=".pdf,.docx,.png,.jpg,.jpeg" @change="handleReplaceFile"
+      />
     </el-card>
   </div>
 </template>
@@ -94,7 +129,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getTasks, batchReview } from '@/api/task'
 import { listTemplates } from '@/api/template'
-import { createReview } from '@/api/review'
+import { createReview, retryReview } from '@/api/review'
+import { reparseContract, replaceContractFile } from '@/api/contract'
 
 const tabs = [
   { key: 'running', label: '进行中' },
@@ -138,8 +174,9 @@ function riskText(r) { return { high: '高', medium: '中', low: '低' }[r] || r
 function riskType(r) { return { high: 'danger', medium: 'warning', low: 'success' }[r] || 'info' }
 function fmtTime(t) { return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '-' }
 
-async function load() {
-  loading.value = true
+async function load(opts = {}) {
+  const silent = opts.silent === true
+  if (!silent) loading.value = true
   try {
     const res = await getTasks()
     summary.value = res.summary
@@ -147,7 +184,24 @@ async function load() {
       running: res.running, failed: res.failed,
       pending: res.pending, parse_failed: res.parse_failed,
     }
-  } finally { loading.value = false }
+    syncPoll()
+  } finally {
+    if (!silent) loading.value = false
+  }
+}
+
+/**
+ * 只有存在「进行中」任务时才轮询，且轮询走静默模式（不亮 loading 遮罩）。
+ * 没有进行中任务时完全停止，避免页面一直闪。
+ */
+function syncPoll() {
+  const needPoll = (summary.value.running || 0) > 0
+  if (needPoll && !timer) {
+    timer = setInterval(() => load({ silent: true }), 5000)
+  } else if (!needPoll && timer) {
+    clearInterval(timer)
+    timer = null
+  }
 }
 
 async function handleBatch() {
@@ -165,17 +219,81 @@ async function handleBatch() {
 }
 
 async function reviewOne(row) {
-  await createReview(row.contract_id, templateId.value)
-  ElMessage.success('已提交审查')
-  await load()
+  busyId.value = row.contract_id
+  try {
+    await createReview(row.contract_id, templateId.value)
+    ElMessage.success('已提交审查')
+    await load()
+  } catch (e) { /* 已提示 */ } finally {
+    busyId.value = null
+  }
+}
+
+// —————————— 失败重试 ——————————
+const busyId = ref(null)
+
+async function retryOne(row) {
+  busyId.value = row.contract_id
+  try {
+    await retryReview(row.review_id)
+    ElMessage.success('已重新提交审查')
+    await load()
+  } catch (e) { /* 已提示 */ } finally {
+    busyId.value = null
+  }
+}
+
+async function reparseOne(row) {
+  busyId.value = row.contract_id
+  try {
+    const res = await reparseContract(row.contract_id)
+    if (res.status === 'parsed') {
+      ElMessage.success(`重新解析成功（${res.word_count} 字）`)
+    } else {
+      ElMessage.warning(res.parse_error || '仍然解析失败，建议重新上传文件')
+    }
+    await load()
+  } catch (e) { /* 已提示 */ } finally {
+    busyId.value = null
+  }
+}
+
+// —————————— 解析失败后重新上传 ——————————
+const replaceInput = ref(null)
+const replaceTarget = ref(null)
+
+function triggerReplace(row) {
+  replaceTarget.value = row
+  replaceInput.value?.click()
+}
+
+async function handleReplaceFile(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file || !replaceTarget.value) return
+  const id = replaceTarget.value.contract_id
+  busyId.value = id
+  try {
+    const res = await replaceContractFile(id, file)
+    if (res.status === 'parsed') {
+      ElMessage.success(`已替换并解析成功（${res.word_count} 字）`)
+    } else {
+      ElMessage.warning(res.parse_error || '替换后仍解析失败')
+    }
+    await load()
+  } catch (err) { /* 已提示 */ } finally {
+    busyId.value = null
+    replaceTarget.value = null
+  }
 }
 
 onMounted(async () => {
   await load()
   try { templates.value = await listTemplates() } catch (e) { /* ignore */ }
-  timer = setInterval(load, 5000)  // 进行中任务自动刷新
 })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => {
+  if (timer) { clearInterval(timer); timer = null }
+})
 </script>
 
 <style scoped>

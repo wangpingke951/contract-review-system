@@ -36,3 +36,18 @@ export function uploadNewVersion(id, file) {
 export function getContractDiff(id) {
   return request.get(`/contracts/${id}/diff`)
 }
+
+/** 原地重新解析已保存的原始文件（配置修复后免重传） */
+export function reparseContract(id) {
+  return request.post(`/contracts/${id}/reparse`, {}, { timeout: 180000 })
+}
+
+/** 用新文件替换原始文件并重新解析（解析失败后重传，不新增记录） */
+export function replaceContractFile(id, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/contracts/${id}/replace`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  })
+}

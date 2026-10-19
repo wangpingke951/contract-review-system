@@ -46,6 +46,7 @@ import app.models.assistant     # noqa: F401
 import app.models.audit         # noqa: F401
 import app.models.template      # noqa: F401
 import app.models.usage         # noqa: F401
+import app.models.system        # noqa: F401
 
 
 # ——— lifespan（启动/关闭钩子）———
@@ -105,6 +106,15 @@ async def lifespan(app: FastAPI):
         async with AsyncSession(engine) as session:
             await template_service.ensure_default_template(session)
             logger.info("✅ 审查模板已就绪")
+
+        # —— 加载模型配置（DB 覆盖 .env，改完即时生效）——
+        from app.services import config_service
+        async with AsyncSession(engine) as session:
+            cfg = await config_service.reload(session)
+            logger.info(
+                f"⚙️  模型配置已加载（来源 {cfg['source']}，"
+                f"provider={cfg['llm_provider']}，model={cfg['llm_model'] or '-'}）"
+            )
 
         # —— 清理孤儿任务：进程重启后，内存里的后台任务已消失，
         #    DB 里残留的 RUNNING 会永远卡住，启动时统一标记失败 ——
@@ -188,6 +198,7 @@ from app.routers import admin as admin_router             # noqa: E402
 from app.routers import assistant as assistant_router     # noqa: E402
 from app.routers import templates as templates_router     # noqa: E402
 from app.routers import tasks as tasks_router             # noqa: E402
+from app.routers import model_config as model_config_router  # noqa: E402
 
 app.include_router(auth_router.router,       prefix="/api/auth",      tags=["认证"])
 app.include_router(contracts_router.router,  prefix="/api/contracts", tags=["合同"])
@@ -197,6 +208,7 @@ app.include_router(admin_router.router,      prefix="/api/admin",     tags=["管
 app.include_router(assistant_router.router,  prefix="/api/assistant", tags=["法律问答"])
 app.include_router(templates_router.router,  prefix="/api/templates", tags=["审查模板"])
 app.include_router(tasks_router.router,      prefix="/api/tasks",     tags=["任务中心"])
+app.include_router(model_config_router.router, prefix="/api/admin/model-config", tags=["模型配置"])
 app.include_router(chat_router.ws_router,                             tags=["对话WebSocket"])
 app.include_router(assistant_router.ws_router,                        tags=["法律问答WebSocket"])
 

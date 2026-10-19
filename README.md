@@ -19,6 +19,7 @@
 | 任务中心 | 进行中 / 失败 / 待审查 / 解析失败四类任务总览，支持批量发起审查与自动刷新 |
 | 对话追问 | 围绕审查报告的 WebSocket 流式多轮对话，30 秒超时保护，回答附带可展开的知识库引用卡片 |
 | 管理后台 | 知识文档上传/替换（旧版本入历史）/删除（同步清理向量库）、版本历史、风险类别增删、操作审计日志、LLM 用量统计 |
+| 模型配置 | 管理员在页面上切换模型提供商、填 API Key/模型名/Base URL，**保存即时生效**；支持一键连通性测试（真实发起最小请求，返回耗时与错误详情） |
 | 安全与限额 | 上传文件魔数校验（防改扩展名）、按用户限流（审查 10 次/分、追问 30 次/分）、并发审查去重、启动时清理中断任务 |
 | 异步审查 | 发起后立即返回 `running`，后台执行，报告页自动轮询刷新，可离开页面；支持进程内后台任务 / Celery 两种模式 |
 | 中文检测 | 自动识别非中文合同并阻断（MVP 明确仅支持中文） |
@@ -150,7 +151,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 模型配置
 
-所有主流供应商均走 OpenAI 兼容协议，改 `.env` 三个变量即可切换：
+两种方式，**页面配置优先于 `.env`**：
+
+1. **管理后台 →「模型配置」**（推荐）：选提供商、填 Key / 模型名 / Base URL，点「测试连通性」验证后保存，**立即生效，不用重启**。
+   密钥保存后只显示掩码（`sk-a****z9`），留空表示不修改，输入 `-` 表示清空。
+2. `.env`：服务启动时读取，作为页面未配置时的兜底。
+
+所有主流供应商均走 OpenAI 兼容协议：
 
 | 供应商 | LLM_BASE_URL | 模型示例 |
 |---|---|---|
@@ -214,13 +221,14 @@ docker compose --profile celery up -d
 | 分组 | 端点 |
 |---|---|
 | 认证 | `POST /api/auth/login` · `POST /api/auth/register` · `GET /api/auth/me` |
-| 合同 | `POST /api/contracts/upload` · `GET /api/contracts` · `GET/DELETE /api/contracts/{id}` · `POST /api/contracts/{id}/versions`（新版本）· `GET /api/contracts/{id}/diff`（版本比对 + 问题闭环） |
+| 合同 | `POST /api/contracts/upload` · `GET /api/contracts` · `GET/DELETE /api/contracts/{id}` · `POST /api/contracts/{id}/versions`（新版本）· `GET /api/contracts/{id}/diff`（版本比对 + 问题闭环）· `POST /api/contracts/{id}/reparse`（原地重解析）· `POST /api/contracts/{id}/replace`（重传替换文件） |
 | 审查 | `POST /api/reviews`（异步，立即返回 running）· `GET /api/reviews/{id}` · `GET /api/reviews/{id}/status` · `POST /api/reviews/{id}/retry` · `GET /api/reviews/by-contract/{contract_id}` · `PATCH /api/reviews/{id}/items/{item_id}` · `POST /api/reviews/{id}/finalize` · `GET /api/reviews/{id}/export` |
 | 模板 | `GET/POST /api/templates` · `PUT/DELETE /api/templates/{id}` |
 | 任务 | `GET /api/tasks` · `POST /api/tasks/batch-review` |
 | 对话 | `GET /api/chat/conversations/{review_id}` · `GET .../messages` · `WS /ws/chat/{conv_id}?token=<jwt>` |
 | 法律问答 | `POST/GET /api/assistant/sessions` · `GET/POST /api/assistant/sessions/{id}/messages` · `DELETE .../{id}` · `WS /ws/assistant/{session_id}?token=<jwt>` |
 | 管理 | `POST /api/admin/knowledge/upload` · `PUT /api/admin/knowledge/{id}`（替换）· `GET /api/admin/knowledge/{id}/versions` · `GET/DELETE /api/admin/knowledge/{id}` · `GET/POST/DELETE /api/admin/categories` · `GET /api/admin/audit-logs` · `GET /api/admin/usage-stats` |
+| 模型配置 | `GET/PUT /api/admin/model-config` · `POST /api/admin/model-config/test`（连通性测试）· `GET /api/admin/model-config/providers` |
 | 健康 | `GET /api/health` |
 
 ## License

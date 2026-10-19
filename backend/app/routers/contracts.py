@@ -26,6 +26,25 @@ from app.schemas.contract import (
 router = APIRouter()
 
 
+def _to_upload_response(contract) -> ContractUploadResponse:
+    """合同解析结果 → 统一响应体（上传 / 重解析 / 替换共用）"""
+    import json as _json
+
+    sections = _json.loads(contract.parsed_sections) if contract.parsed_sections else []
+    return ContractUploadResponse(
+        id=contract.id,
+        filename=contract.filename,
+        file_type=contract.file_type,
+        status=contract.status.value,
+        word_count=len(contract.parsed_content or ""),
+        language="zh-CN",
+        sections=sections,
+        parse_errors=[contract.parse_error] if contract.parse_error else [],
+        parse_error=contract.parse_error,
+        version=contract.version or 1,
+    )
+
+
 @router.post("/upload", response_model=ContractUploadResponse)
 async def upload_contract(
     file: UploadFile = File(...),
@@ -52,23 +71,7 @@ async def upload_contract(
     )
 
     # 转换为响应
-    parsed_sections = []
-    if contract.parsed_sections:
-        import json
-        parsed_sections = json.loads(contract.parsed_sections)
-
-    return ContractUploadResponse(
-        id=contract.id,
-        filename=contract.filename,
-        file_type=contract.file_type,
-        status=contract.status.value,
-        word_count=len(contract.parsed_content or ""),
-        language="zh-CN",
-        sections=parsed_sections,
-        parse_errors=[contract.parse_error] if contract.parse_error else [],
-        parse_error=contract.parse_error,
-        version=contract.version or 1,
-    )
+    return _to_upload_response(contract)
 
 
 @router.get("", response_model=ContractListResponse)
@@ -140,6 +143,65 @@ async def upload_new_version(
         parse_error=contract.parse_error,
         version=contract.version or 1,
     )
+
+@router.post("/{contract_id}/reparse", response_model=ContractUploadResponse)
+async def reparse_contract(
+    contract_id: int,
+    db: AsyncSession = Depends(get_db),
+    current: TokenPayload = Depends(get_current_user),
+):
+    """
+    原地重新解析已保存的原始文件。
+
+    典型场景：上传时多模态模型尚未配置、解析器临时异常导致 parsing_failed，
+    配好之后点「重新解析」即可，不用重新上传。
+    """
+    from app.models.audit import ACTION_CONTRACT_REPARSE
+
+    contract = await contract_service.reparse(
+        db, contract_id, current.user_id, current.role.value == "admin"
+    )
+    await audit_service.record(
+        db,
+        actor_id=current.user_id,
+        actor_name=current.username,
+        action=ACTION_CONTRACT_REPARSE,
+        target_type="contract",
+        target_id=contract.id,
+        detail=f"{contract.filename}（{contract.status.value}）",
+        commit=True,
+    )
+    return _to_upload_response(contract)
+
+
+@router.post("/{contract_id}/replace", response_model=ContractUploadResponse)
+async def replace_contract_file(
+    contract_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current: TokenPayload = Depends(get_current_user),
+):
+    """
+    用新文件替换该合同的原始文件并重新解析（解析失败后重传）。
+
+    不新增记录、版本号不变，列表里不会多出一条。
+    """
+    from app.models.audit import ACTION_CONTRACT_REPLACE
+
+    contract = await contract_service.replace_file(
+        db, contract_id, file, current.user_id, current.role.value == "admin"
+    )
+    await audit_service.record(
+        db,
+        actor_id=current.user_id,
+        actor_name=current.username,
+        action=ACTION_CONTRACT_REPLACE,
+        target_type="contract",
+        target_id=contract.id,
+        detail=f"{contract.filename}（{contract.status.value}）",
+        commit=True,
+    )
+    return _to_upload_response(contract)
 
 
 @router.get("/{contract_id}/diff")

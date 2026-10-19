@@ -102,29 +102,32 @@ class VisionExtractor:
 def get_vision_extractor() -> tuple[Optional[VisionExtractor], str]:
     """
     返回 (提取器, 不可用原因)。
-    配置缺失时提取器为 None，原因文案直接回给用户，避免「识别失败」这种无指向的报错。
+    配置来源：config_service.snapshot()（页面可改，DB 优先于 .env）。
     """
-    s = get_settings()
+    from app.services import config_service
 
-    if s.LLM_PROVIDER == "mock" and not s.VISION_MODEL:
+    cfg = config_service.snapshot()
+    provider = (cfg.get("llm_provider") or "mock").lower()
+    vision_model = cfg.get("vision_model") or ""
+
+    if provider == "mock" and not vision_model:
         return None, (
             "图片合同需要多模态模型识别，当前为 mock 模式无法识图。"
-            "请在 backend/.env 配置 VISION_MODEL（如 doubao-vision / qwen-vl-plus / Qwen/Qwen2.5-VL-7B-Instruct）"
-            "及 VISION_API_KEY 后重启后端；也可改用 PDF / Word 格式上传"
+            "请在「模型配置」页面填写视觉模型（如 doubao-vision-pro-32k / "
+            "qwen-vl-plus / Qwen/Qwen2.5-VL-7B-Instruct）后再试；也可改用 PDF / Word 上传"
         )
 
-    api_key = s.VISION_API_KEY or s.LLM_API_KEY
-    model = s.VISION_MODEL
-    base_url = s.VISION_BASE_URL or s.LLM_BASE_URL
+    api_key = cfg.get("vision_api_key") or cfg.get("llm_api_key") or ""
+    base_url = cfg.get("vision_base_url") or cfg.get("llm_base_url") or ""
 
-    if not model:
+    if not vision_model:
         return None, (
-            "多模态识别未配置：请在 backend/.env 设置 VISION_MODEL"
-            "（如 doubao-vision / qwen-vl-plus / Qwen/Qwen2.5-VL-7B-Instruct）"
+            "多模态识别未配置：请在「模型配置」页面填写视觉模型"
+            "（如 doubao-vision-pro-32k / qwen-vl-plus / Qwen/Qwen2.5-VL-7B-Instruct）"
         )
     if not api_key:
-        return None, "多模态识别未配置：请在 backend/.env 设置 VISION_API_KEY（留空则继承 LLM_API_KEY）"
+        return None, "多模态识别未配置：视觉模型 API Key 与主模型 API Key 均为空"
     if not base_url:
-        return None, "多模态识别未配置：请在 backend/.env 设置 VISION_BASE_URL（留空则继承 LLM_BASE_URL）"
+        return None, "多模态识别未配置：请填写视觉模型的 Base URL（留空则继承主模型）"
 
-    return VisionExtractor(base_url=base_url, api_key=api_key, model=model), ""
+    return VisionExtractor(base_url=base_url, api_key=api_key, model=vision_model), ""
