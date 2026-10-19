@@ -16,6 +16,7 @@ class OverallRisk(str, Enum):
 
 
 class ReviewStatus(str, Enum):
+    RUNNING = "running"   # 审查进行中（异步执行）
     DONE = "done"
     FAILED = "failed"
 
@@ -24,6 +25,14 @@ class RiskLevel(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
+
+class RiskItemStatus(str, Enum):
+    """风险项人工处置状态（PRD P1：确认 / 忽略 / 标记待改）"""
+    PENDING = "pending"      # 待处理（默认）
+    CONFIRMED = "confirmed"  # 已确认
+    IGNORED = "ignored"      # 已忽略
+    TODO = "todo"            # 标记待改
 
 
 class Review(Base):
@@ -41,6 +50,20 @@ class Review(Base):
     status: Mapped[ReviewStatus] = mapped_column(
         SQLEnum(ReviewStatus, name="review_status"),
         nullable=False, default=ReviewStatus.DONE,
+    )
+    # 审查失败原因（异步执行时前端轮询展示）
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ——— 审查模板（不同合同类型用不同审查维度）———
+    template_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    template_name: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 快照
+
+    # ——— 报告定稿（定稿后锁定，不可再修改风险项）———
+    finalized_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    finalized_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
     )
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -80,3 +103,14 @@ class RiskItem(Base):
     # 原文在合同全文中的字符位置（用于前端高亮定位）
     char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # 人工处置状态：待处理 / 已确认 / 已忽略 / 待修改
+    status: Mapped[RiskItemStatus] = mapped_column(
+        SQLEnum(RiskItemStatus, name="risk_item_status"),
+        nullable=False,
+        default=RiskItemStatus.PENDING,
+    )
+    # 处置时间（便于审计）
+    handled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )

@@ -27,7 +27,7 @@ export function createChatSocket(convId, token, { onDelta, onDone, onError }) {
     try {
       const frame = JSON.parse(evt.data)
       if (frame.type === 'delta') onDelta?.(frame.content)
-      else if (frame.type === 'done') onDone?.(frame.answer)
+      else if (frame.type === 'done') onDone?.(frame.answer, frame.citations || [])
       else if (frame.type === 'error') onError?.(frame.message)
     } catch { /* 忽略坏帧 */ }
   }

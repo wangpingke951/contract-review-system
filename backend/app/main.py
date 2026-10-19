@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.core.database import Base, engine
@@ -28,6 +30,9 @@ from app.core.exceptions import register_exception_handlers
 
 settings = get_settings()
 logger = logging.getLogger("app")
+
+# 前端构建产物目录（SERVE_FRONTEND=true 时挂载）：backend/app/main.py → 项目根/frontend/dist
+_SPA_DIST: Path | None = None
 
 
 # ——— 导入所有 ORM model（注册到 Base.metadata）———
@@ -38,6 +43,9 @@ import app.models.review        # noqa: F401
 import app.models.conversation  # noqa: F401
 import app.models.category      # noqa: F401
 import app.models.assistant     # noqa: F401
+import app.models.audit         # noqa: F401
+import app.models.template      # noqa: F401
+import app.models.usage         # noqa: F401
 
 
 # ——— lifespan（启动/关闭钩子）———
@@ -91,6 +99,36 @@ async def lifespan(app: FastAPI):
             if any(name not in existing_cats for name in default_categories):
                 await session.commit()
                 logger.info("✅ 已创建默认风险类别")
+
+        # —— seed 默认审查模板 ——
+        from app.services import template_service
+        async with AsyncSession(engine) as session:
+            await template_service.ensure_default_template(session)
+            logger.info("✅ 审查模板已就绪")
+
+        # —— 清理孤儿任务：进程重启后，内存里的后台任务已消失，
+        #    DB 里残留的 RUNNING 会永远卡住，启动时统一标记失败 ——
+        from sqlalchemy import update
+        from app.models.review import Review as _Review, ReviewStatus as _RS
+        from app.models.contract import Contract as _Contract, ContractStatus as _CS
+        async with AsyncSession(engine) as session:
+            res = await session.execute(
+                update(_Review)
+                .where(_Review.status == _RS.RUNNING)
+                .values(
+                    status=_RS.FAILED,
+                    error_message="服务重启，后台任务已中断，请重新发起审查",
+                )
+            )
+            cnt = res.rowcount or 0
+            await session.execute(
+                update(_Contract)
+                .where(_Contract.status == _CS.REVIEWING)
+                .values(status=_CS.PARSED)
+            )
+            await session.commit()
+            if cnt:
+                logger.info(f"🧹 清理了 {cnt} 条中断的审查任务")
 
     except Exception as e:
         logger.warning(f"⚠️ 启动初始化失败: {e}")
@@ -148,6 +186,8 @@ from app.routers import reviews as reviews_router         # noqa: E402
 from app.routers import chat as chat_router               # noqa: E402
 from app.routers import admin as admin_router             # noqa: E402
 from app.routers import assistant as assistant_router     # noqa: E402
+from app.routers import templates as templates_router     # noqa: E402
+from app.routers import tasks as tasks_router             # noqa: E402
 
 app.include_router(auth_router.router,       prefix="/api/auth",      tags=["认证"])
 app.include_router(contracts_router.router,  prefix="/api/contracts", tags=["合同"])
@@ -155,6 +195,8 @@ app.include_router(reviews_router.router,    prefix="/api/reviews",   tags=["审
 app.include_router(chat_router.router,       prefix="/api/chat",      tags=["对话"])
 app.include_router(admin_router.router,      prefix="/api/admin",     tags=["管理后台"])
 app.include_router(assistant_router.router,  prefix="/api/assistant", tags=["法律问答"])
+app.include_router(templates_router.router,  prefix="/api/templates", tags=["审查模板"])
+app.include_router(tasks_router.router,      prefix="/api/tasks",     tags=["任务中心"])
 app.include_router(chat_router.ws_router,                             tags=["对话WebSocket"])
 app.include_router(assistant_router.ws_router,                        tags=["法律问答WebSocket"])
 
@@ -174,11 +216,47 @@ async def health():
     }
 
 
-# ——— 简单测试端点 ———
+# ——— 简单测试端点（未托管前端时返回服务信息）———
 @app.get("/")
 async def root():
+    if _SPA_DIST is not None:
+        return FileResponse(_SPA_DIST / "index.html")
     return JSONResponse({
         "code": 0,
         "data": {"service": "contract-review-api", "version": "1.0.0"},
         "message": "合同智能审查系统 API 运行中，访问 /api/health 检查状态",
     })
+
+
+# ——— 可选：由 FastAPI 托管前端构建产物 ———
+# 用途：内网穿透只映射 8000 一个端口 / 单机交付，不需要再起 vite 或 nginx。
+# 开启：backend/.env 设 SERVE_FRONTEND=true，并先执行 cd frontend && npm run build
+if settings.SERVE_FRONTEND:
+    _candidate = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if (_candidate / "index.html").is_file():
+        _SPA_DIST = _candidate
+        _assets_dir = _candidate / "assets"
+        if _assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            """SPA 兜底：静态文件优先，其余路径交给前端路由"""
+            # API / WebSocket 前缀不接管，避免把 404 伪装成页面
+            if full_path.startswith(("api/", "ws/")):
+                return JSONResponse(
+                    {"code": 404, "message": "接口不存在", "data": None},
+                    status_code=404,
+                )
+            target = (_candidate / full_path).resolve()
+            # 防目录穿越：解析后必须仍在 dist 内
+            if str(target).startswith(str(_candidate.resolve())) and target.is_file():
+                return FileResponse(target)
+            return FileResponse(_candidate / "index.html")
+
+        logger.info(f"🖼  已启用前端静态托管: {_candidate}")
+    else:
+        logger.warning(
+            "SERVE_FRONTEND=true 但未找到 frontend/dist/index.html，请先执行 "
+            "`cd frontend && npm run build`；当前仍以纯 API 模式运行"
+        )

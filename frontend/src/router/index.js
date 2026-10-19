@@ -8,6 +8,7 @@ const routes = [
 
   // —— 主流程（登录后）——
   { path: '/', name: 'Home', component: () => import('@/views/Home.vue') },
+  { path: '/tasks', name: 'TaskCenter', component: () => import('@/views/TaskCenter.vue') },
   { path: '/assistant', name: 'Assistant', component: () => import('@/views/Assistant.vue') },
   {
     path: '/reviews/contract/:contractId',
@@ -19,6 +20,9 @@ const routes = [
   // —— 管理员 ——
   { path: '/admin/knowledge', name: 'KnowledgeManage', component: () => import('@/views/admin/KnowledgeManage.vue'), meta: { admin: true } },
   { path: '/admin/categories', name: 'CategoryManage', component: () => import('@/views/admin/CategoryManage.vue'), meta: { admin: true } },
+  { path: '/admin/templates', name: 'TemplateManage', component: () => import('@/views/admin/TemplateManage.vue'), meta: { admin: true } },
+  { path: '/admin/audit', name: 'AuditLog', component: () => import('@/views/admin/AuditLog.vue'), meta: { admin: true } },
+  { path: '/admin/usage', name: 'UsageStats', component: () => import('@/views/admin/UsageStats.vue'), meta: { admin: true } },
 
   // —— 兜底 ——
   { path: '/:pathMatch(.*)*', redirect: '/' },

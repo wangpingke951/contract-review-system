@@ -16,6 +16,25 @@
         <div class="bubble">
           <div class="md" v-html="renderMarkdown(m.content)"></div>
           <span v-if="m.streaming" class="cursor">▌</span>
+
+          <div v-if="!m.streaming && m.citations && m.citations.length" class="citations">
+            <div class="cit-title">知识库依据（{{ m.citations.length }}）</div>
+            <div
+              v-for="(c, ci) in m.citations" :key="ci"
+              class="cit" @click="c.open = !c.open"
+            >
+              <div class="cit-line">
+                <el-icon><Document /></el-icon>
+                <span class="cit-src">{{ c.source_filename }}</span>
+                <span class="cit-sim">{{ Math.round((c.similarity || 0) * 100) }}%</span>
+              </div>
+              <div v-if="c.open" class="cit-text">{{ c.text }}</div>
+            </div>
+          </div>
+
+          <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="disclaimer">
+            以上内容仅供参考，不构成法律意见。
+          </div>
         </div>
       </div>
     </div>
@@ -83,9 +102,12 @@ onMounted(async () => {
         const cur = socket._current
         if (cur) { cur.content += text; scrollToBottom() }
       },
-      onDone() {
+      onDone(_answer, citations) {
         const cur = socket._current
-        if (cur) cur.streaming = false
+        if (cur) {
+          cur.streaming = false
+          cur.citations = (citations || []).map((c) => ({ ...c, open: false }))
+        }
         streaming.value = false
         socket._current = null
         scrollToBottom()
@@ -130,6 +152,15 @@ onUnmounted(() => { socket?.close() })
 .msg.user .bubble { background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; white-space: pre-wrap; }
 .msg.assistant .bubble { background: #f3f4f6; color: #1f2329; border-bottom-left-radius: 4px; }
 .cursor { animation: blink 1s infinite; }
+.disclaimer { margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e5e7eb; font-size: 11px; color: #9ca3af; }
+.citations { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+.cit-title { font-size: 11px; color: #6b7280; margin-bottom: 6px; }
+.cit { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 6px; padding: 5px 8px; margin-bottom: 5px; cursor: pointer; }
+.cit:hover { border-color: #bfdbfe; background: #f0f9ff; }
+.cit-line { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #374151; }
+.cit-src { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cit-sim { color: #2563eb; font-size: 11px; }
+.cit-text { margin-top: 5px; font-size: 12px; line-height: 1.6; color: #4b5563; white-space: pre-wrap; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* markdown 渲染节点（v-html 内容需 :deep） */

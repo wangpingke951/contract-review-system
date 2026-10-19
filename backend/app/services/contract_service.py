@@ -16,7 +16,7 @@ from typing import Optional
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.config import get_settings
 from app.core.exceptions import AppError, NotFoundError, ValidationError
@@ -42,6 +42,7 @@ async def upload_and_parse(
     db: AsyncSession,
     file: UploadFile,
     uploader_id: int,
+    base: Optional[Contract] = None,
 ) -> Contract:
     """
     上传 + 解析（同步执行）
@@ -49,9 +50,10 @@ async def upload_and_parse(
     流程：
     1. 校验文件类型和大小（不通过 → 抛 ValidationError，文件不入库）
     2. 保存到 UPLOAD_DIR/{uploader_id}/{timestamp}_{safe_filename}
-    3. 调 parser 解析
-    4. 判定结果：解析报错 / 内容过少 / 非中文 → status=parsing_failed + parse_error
-    5. 写 DB
+    3. 校验文件真实类型（魔数，防改扩展名绕过）
+    4. 调 parser 解析
+    5. 判定结果：解析报错 / 内容过少 / 非中文 → status=parsing_failed + parse_error
+    6. 写 DB（base 不为空时作为该合同的新版本）
 
     设计说明：解析类失败**不再抛异常**，而是落库并随正常响应返回。
     这样批量上传时单个文件失败不会中断整批，前端也能逐条展示失败原因。
@@ -82,7 +84,18 @@ async def upload_and_parse(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # —— 3. 写 DB（初始状态 parsing）——
+    # —— 3. 真实类型校验（魔数）——
+    from app.core import file_guard
+    try:
+        file_guard.verify(file_path, ext)
+    except ValidationError:
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+        raise
+
+    # —— 4. 写 DB（初始状态 parsing）——
     file_type = _TYPE_MAP.get(ext, ext)
     contract = Contract(
         filename=filename,
@@ -90,15 +103,18 @@ async def upload_and_parse(
         file_path=file_path,
         status=ContractStatus.PARSING,
         uploader_id=uploader_id,
+        version=(base.version + 1) if base else 1,
+        root_contract_id=((base.root_contract_id or base.id) if base else None),
+        parent_contract_id=(base.id if base else None),
     )
     db.add(contract)
     await db.flush()  # 拿到 contract.id
 
-    # —— 4. 解析 ——
+    # —— 5. 解析 ——
     parser = get_parser(filename)
     result = await parser.parse(file_path)
 
-    # —— 5. 判定解析结果（失败不抛异常，落库后由前端展示原因）——
+    # —— 6. 判定解析结果（失败不抛异常，落库后由前端展示原因）——
     error = _judge_parse_result(result)
 
     if error:
@@ -117,6 +133,39 @@ async def upload_and_parse(
     await db.commit()
     await db.refresh(contract)
     return contract
+
+
+async def upload_new_version(
+    db: AsyncSession,
+    base_contract_id: int,
+    file: UploadFile,
+    uploader_id: int,
+    is_admin: bool = False,
+) -> Contract:
+    """上传同一份合同的新版本（保留旧版本，供比对与问题闭环）"""
+    base = await get_by_id(db, base_contract_id)
+    if not base:
+        raise NotFoundError("基准合同不存在")
+    if not is_admin and base.uploader_id != uploader_id:
+        from app.core.exceptions import PermissionError
+        raise PermissionError("无权为该合同上传新版本")
+
+    # 版本号 = 同族最大版本 + 1（避免删掉中间版本后编号重复）
+    root_id = base.root_contract_id or base.id
+    max_version = (await db.execute(
+        select(func.max(Contract.version)).where(
+            (Contract.id == root_id)
+            | (Contract.root_contract_id == root_id)
+            | (Contract.parent_contract_id == root_id)
+        )
+    )).scalar() or base.version
+
+    new_contract = await upload_and_parse(db, file, uploader_id, base=base)
+    if new_contract.version <= max_version:
+        new_contract.version = max_version + 1
+        await db.commit()
+        await db.refresh(new_contract)
+    return new_contract
 
 
 def _judge_parse_result(result) -> str | None:
@@ -151,6 +200,47 @@ async def list_by_user(
     stmt = stmt.order_by(Contract.created_at.desc()).offset((page - 1) * size).limit(size)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_by_user(
+    db: AsyncSession,
+    user_id: int,
+    is_admin: bool = False,
+) -> int:
+    """与 list_by_user 同条件的总数（分页器用）"""
+    from sqlalchemy import func
+
+    stmt = select(func.count(Contract.id))
+    if not is_admin:
+        stmt = stmt.where(Contract.uploader_id == user_id)
+    return (await db.execute(stmt)).scalar() or 0
+
+
+async def count_follow_ups(db: AsyncSession, contract_ids: list[int]) -> dict[int, int]:
+    """
+    批量统计每份合同的「提问轮次」（PRD 4.4：历史列表显示「有 N 条追问」）
+
+    统计口径：该合同审查报告对应会话中 role=user 的消息条数。
+    一次聚合查询，避免列表 N+1。
+    """
+    if not contract_ids:
+        return {}
+    from sqlalchemy import func
+    from app.models.review import Review
+    from app.models.conversation import Conversation, Message, ConversationRole
+
+    stmt = (
+        select(Review.contract_id, func.count(Message.id))
+        .join(Conversation, Conversation.review_id == Review.id)
+        .join(Message, Message.conversation_id == Conversation.id)
+        .where(
+            Review.contract_id.in_(contract_ids),
+            Message.role == ConversationRole.USER,
+        )
+        .group_by(Review.contract_id)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {contract_id: count for contract_id, count in rows}
 
 
 async def get_by_id(db: AsyncSession, contract_id: int) -> Optional[Contract]:

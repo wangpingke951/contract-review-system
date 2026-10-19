@@ -65,3 +65,33 @@ class KnowledgeDoc(Base):
         default=lambda: datetime.now(),
         nullable=False,
     )
+
+
+class KnowledgeDocVersion(Base):
+    """
+    知识文档的历史版本（PRD P1：知识库版本历史）
+
+    每次「替换内容」时，把被替换掉的旧版本快照写入本表；
+    文件本体不保留（磁盘只存当前版本），但文件名、分类、切块数、替换时间可追溯。
+    """
+    __tablename__ = "knowledge_doc_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doc_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("knowledge_docs.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # 被替换版本的信息快照
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[KnowledgeCategory] = mapped_column(
+        SQLEnum(KnowledgeCategory, name="knowledge_category"), nullable=False,
+    )
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    replaced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(),
+        nullable=False,
+    )
+    replaced_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )

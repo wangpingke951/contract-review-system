@@ -26,6 +26,8 @@ class ContractUploadResponse(BaseModel):
     parse_errors: List[str] = Field(default_factory=list)
     # 面向用户的失败原因（成功时为 None）
     parse_error: Optional[str] = None
+    # 版本号（同一合同多次修改上传时递增）
+    version: int = 1
 
 
 class ContractListItem(BaseModel):
@@ -36,6 +38,11 @@ class ContractListItem(BaseModel):
     status: str
     created_at: datetime
     parse_error: Optional[str] = None
+    # 该合同已产生的追问轮次（PRD 4.4 历史列表展示）
+    follow_up_count: int = 0
+    # 版本号（同一合同多次修改上传）
+    version: int = 1
+    root_contract_id: Optional[int] = None
 
 
 class ContractListResponse(BaseModel):
@@ -54,3 +61,5 @@ class ContractDetailResponse(BaseModel):
     parse_error: Optional[str] = None
     created_at: datetime
     uploader_id: int
+    version: int = 1
+    parent_contract_id: Optional[int] = None

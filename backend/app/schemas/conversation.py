@@ -23,3 +23,4 @@ class QuestionIn(BaseModel):
 
 class QuestionOut(BaseModel):
     answer: str
+    citations: list[dict] = []

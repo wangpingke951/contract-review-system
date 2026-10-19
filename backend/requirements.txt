@@ -23,10 +23,13 @@ celery[redis]==5.4.0
 redis==5.1.0
 
 # ——— RAG / LangChain ———
-langchain==0.3.4
+# langchain 0.3.4 与 langchain-community 0.3.4 存在依赖冲突（后者要求 langchain>=0.3.6），故用 0.3.7
+langchain==0.3.7
 langchain-community==0.3.4
 langchain-text-splitters==0.3.0
-chromadb-client==0.5.15
+# chromadb-client 是瘦客户端，不含 PersistentClient / embedding_functions（代码里 embedded 模式要用）；
+# 而 chromadb 0.5.x 依赖的 chroma-hnswlib 在 Windows 无预编译 wheel（需 MSVC 编译）。统一用 1.0.15。
+chromadb==1.0.15
 httpx==0.27.2
 aiohttp==3.10.8
 

@@ -15,6 +15,14 @@ class KnowledgeDocOut(BaseModel):
     created_at: datetime
 
 
+class KnowledgeVersionOut(BaseModel):
+    id: int
+    filename: str
+    category: str
+    chunk_count: int
+    replaced_at: datetime
+
+
 class CategoryOut(BaseModel):
     id: int
     name: str
@@ -23,3 +31,19 @@ class CategoryOut(BaseModel):
 
 class CategoryCreate(BaseModel):
     name: str
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    actor_id: Optional[int] = None
+    actor_name: str
+    action: str
+    target_type: str = ""
+    target_id: Optional[int] = None
+    detail: Optional[str] = None
+    created_at: datetime
+
+
+class AuditLogListResponse(BaseModel):
+    items: List[AuditLogOut]
+    total: int

@@ -24,6 +24,10 @@
             <el-icon><HomeFilled /></el-icon>
             <span>首页 / 审查</span>
           </el-menu-item>
+          <el-menu-item index="/tasks">
+            <el-icon><List /></el-icon>
+            <span>任务中心</span>
+          </el-menu-item>
           <el-menu-item index="/assistant">
             <el-icon><ChatDotRound /></el-icon>
             <span>法律问答</span>
@@ -32,9 +36,21 @@
             <el-icon><FolderOpened /></el-icon>
             <span>知识库管理</span>
           </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/admin/templates">
+            <el-icon><Collection /></el-icon>
+            <span>审查模板</span>
+          </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/admin/categories">
-            <el-icon><Tag /></el-icon>
+            <el-icon><CollectionTag /></el-icon>
             <span>风险类别</span>
+          </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/admin/audit">
+            <el-icon><Tickets /></el-icon>
+            <span>审计日志</span>
+          </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/admin/usage">
+            <el-icon><DataLine /></el-icon>
+            <span>用量统计</span>
           </el-menu-item>
         </el-menu>
       </el-aside>

@@ -28,20 +28,25 @@ MIN_SIMILARITY = 0.65
 TOP_K_PER_DIM = 8
 
 
-async def retrieve_for_review(contract_text: str) -> dict[str, list[dict]]:
+async def retrieve_for_review(
+    contract_text: str,
+    dimensions: list[tuple[str, str]] | None = None,
+) -> dict[str, list[dict]]:
     """
     为一次审查执行多维度检索
+    - dimensions 为空时用内置的 9 个通用维度；否则用审查模板配置的维度
     返回 {维度名: [evidence, ...]}
     知识库为空时返回 {}（调用方走无 RAG 降级路径）
     """
     if vectorstore.count_chunks() == 0:
         return {}
 
+    dims = dimensions or REVIEW_DIMENSIONS
     embedding = get_embedding()
     evidences: dict[str, list[dict]] = {}
     seen_ids: set[str] = set()
 
-    for dim_name, dim_desc in REVIEW_DIMENSIONS:
+    for dim_name, dim_desc in dims:
         query = f"{dim_desc}。合同内容摘要：{contract_text[:300]}"
         vec = await embedding.embed_text(query)
         hits = vectorstore.similarity_search(
@@ -63,7 +68,12 @@ async def retrieve_for_review(contract_text: str) -> dict[str, list[dict]]:
 
 
 async def retrieve_for_chat(question: str, k: int = 6) -> list[dict]:
-    """对话追问时的检索：单 query，返回证据列表"""
+    """
+    对话追问时的检索：单 query，返回证据列表
+
+    阈值比审查场景低（0.30）：追问是开放式提问，措辞与知识条目差异大；
+    本地 embedding 中文效果本就一般，阈值过高会导致「永远没有依据」。
+    """
     if vectorstore.count_chunks() == 0:
         return []
     embedding = get_embedding()
@@ -72,5 +82,5 @@ async def retrieve_for_chat(question: str, k: int = 6) -> list[dict]:
         query_embedding=vec,
         query_text=None,
         k=k,
-        min_similarity=0.55,  # 对话场景阈值稍宽松
+        min_similarity=0.30,
     )

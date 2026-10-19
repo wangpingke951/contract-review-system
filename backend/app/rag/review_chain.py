@@ -82,14 +82,17 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-async def run_review(contract_text: str) -> dict:
+async def run_review(
+    contract_text: str,
+    dimensions: list[tuple[str, str]] | None = None,
+) -> dict:
     """
     执行完整审查：
-    1. 多维度检索知识库
+    1. 多维度检索知识库（维度可由审查模板配置）
     2. 构造 Prompt → LLM
     3. 解析 JSON → {"overall_risk": ..., "risk_items": [...]}
     """
-    evidences = await retrieve_for_review(contract_text)
+    evidences = await retrieve_for_review(contract_text, dimensions)
     user_prompt = _build_user_prompt(contract_text, evidences)
 
     llm = get_llm()
@@ -114,6 +117,13 @@ async def run_review(contract_text: str) -> dict:
         item.setdefault("source_knowledge_ids", [])
         item.setdefault("category_name", "其他")
 
-    report["overall_risk"] = report.get("overall_risk") if report.get("overall_risk") in valid_levels else "medium"
+    # 总体风险等级按 PRD 4.3 规则由高风险条数决定，不采用模型自评（保证同一份合同结论稳定）
+    # ≥3 条高风险 → 高；1–2 条 → 中；0 条 → 低
+    high_count = sum(
+        1 for it in report["risk_items"]
+        if not it["is_positive"] and it["risk_level"] == "high"
+    )
+    report["overall_risk"] = "high" if high_count >= 3 else ("medium" if high_count >= 1 else "low")
+    report["high_risk_count"] = high_count
     report["has_rag_evidence"] = bool(evidences)
     return report

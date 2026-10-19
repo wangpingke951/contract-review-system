@@ -3,7 +3,7 @@
   <el-card>
     <template #header>
       <div class="card-header">
-        <el-icon><Tag /></el-icon>
+        <el-icon><CollectionTag /></el-icon>
         <span>风险类别管理</span>
         <el-button type="primary" style="margin-left:auto" @click="dialogVisible = true">
           <el-icon><Plus /></el-icon> 新增类别

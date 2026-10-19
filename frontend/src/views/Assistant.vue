@@ -47,6 +47,9 @@
           <div class="bubble">
             <div class="md" v-html="renderMarkdown(m.content)"></div>
             <span v-if="m.streaming" class="cursor">▌</span>
+            <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="disclaimer">
+              以上内容仅供参考，不构成法律意见。
+            </div>
           </div>
         </div>
       </div>
@@ -304,6 +307,7 @@ onUnmounted(() => { socket?.close() })
 .msg.user .bubble { background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; white-space: pre-wrap; }
 .msg.assistant .bubble { background: #f3f4f6; color: #1f2329; border-bottom-left-radius: 4px; }
 .cursor { animation: blink 1s infinite; }
+.disclaimer { margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e5e7eb; font-size: 11px; color: #9ca3af; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* 渲染后的 markdown 内容（v-html 生成的节点需要 :deep 才能命中 scoped 样式） */

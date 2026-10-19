@@ -15,14 +15,17 @@ WebSocket:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.database import get_db, SessionLocal
 from app.core.dependencies import get_current_user, TokenPayload
+from app.core.rate_limit import chat_limiter
 from app.core.security import decode_access_token, TokenPayload as TP
 from app.core.exceptions import NotFoundError, PermissionError, AppError
 from app.models.conversation import Conversation
@@ -30,6 +33,8 @@ from app.services import chat_service
 from app.schemas.conversation import (
     ConversationOut, MessageOut, QuestionIn, QuestionOut,
 )
+
+settings = get_settings()
 
 router = APIRouter()       # REST：挂到 /api/chat
 ws_router = APIRouter()    # WebSocket：挂到根 /ws
@@ -78,12 +83,30 @@ async def post_message(
 ):
     """非流式提问（WebSocket 不可用时的降级路径）"""
     await _get_conv_checked(db, conv_id, current)
-    chunks: list[str] = []
-    async for delta in chat_service.stream_chat_answer(db, conv_id, body.content):
-        chunks.append(delta)
-    answer = "".join(chunks)
+
+    allowed, wait = chat_limiter.allow(
+        f"chat:{current.user_id}", settings.RATE_LIMIT_CHAT_PER_MINUTE
+    )
+    if not allowed:
+        raise AppError(f"提问过于频繁，请 {wait} 秒后再试", code=429)
+
+    citations: list[dict] = []
+
+    async def _collect() -> str:
+        chunks: list[str] = []
+        async for delta in chat_service.stream_chat_answer(db, conv_id, body.content, citations):
+            chunks.append(delta)
+        return "".join(chunks)
+
+    try:
+        answer = await asyncio.wait_for(_collect(), timeout=settings.CHAT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        raise AppError(
+            f"回复超时（超过 {settings.CHAT_TIMEOUT_SECONDS} 秒），请重试",
+            code=504,
+        )
     await chat_service.persist_messages(db, conv_id, body.content, answer)
-    return QuestionOut(answer=answer)
+    return QuestionOut(answer=answer, citations=citations)
 
 
 # —————————— WebSocket ——————————
@@ -124,15 +147,48 @@ async def ws_chat(websocket: WebSocket, conv_id: int, token: str = ""):
                     await websocket.send_json({"type": "error", "message": "问题不能为空"})
                     continue
 
-                # 流式推增量
+                # 流式推增量（PRD 4.4：30 秒超时，超时保留已生成部分）
+                allowed, wait = chat_limiter.allow(
+                    f"chat:{current.user_id}", settings.RATE_LIMIT_CHAT_PER_MINUTE
+                )
+                if not allowed:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"提问过于频繁，请 {wait} 秒后再试",
+                    })
+                    continue
+
                 chunks: list[str] = []
-                async for delta in chat_service.stream_chat_answer(db, conv_id, question):
-                    chunks.append(delta)
-                    await websocket.send_json({"type": "delta", "content": delta})
+                citations: list[dict] = []
+                timed_out = False
+                try:
+                    async with asyncio.timeout(settings.CHAT_TIMEOUT_SECONDS):
+                        async for delta in chat_service.stream_chat_answer(
+                            db, conv_id, question, citations
+                        ):
+                            chunks.append(delta)
+                            await websocket.send_json({"type": "delta", "content": delta})
+                except TimeoutError:
+                    timed_out = True
 
                 answer = "".join(chunks)
-                await chat_service.persist_messages(db, conv_id, question, answer)
-                await websocket.send_json({"type": "done", "answer": answer})
+                if answer:
+                    await chat_service.persist_messages(db, conv_id, question, answer)
+
+                if timed_out:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            f"回复超时（超过 {settings.CHAT_TIMEOUT_SECONDS} 秒），"
+                            f"已返回已生成内容，请重试"
+                        ),
+                    })
+                else:
+                    await websocket.send_json({
+                        "type": "done",
+                        "answer": answer,
+                        "citations": citations,
+                    })
 
         except WebSocketDisconnect:
             return

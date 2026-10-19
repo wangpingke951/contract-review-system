@@ -47,3 +47,9 @@ class Contract(Base):
         default=lambda: datetime.now(),
         nullable=False,
     )
+
+    # ——— 合同版本（同一份合同反复修改后重新上传）———
+    # version 从 1 开始；root_contract_id 指向同族首版，parent_contract_id 指向上一版
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    root_contract_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    parent_contract_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

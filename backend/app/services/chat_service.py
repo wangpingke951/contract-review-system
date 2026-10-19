@@ -93,10 +93,12 @@ async def stream_chat_answer(
     db: AsyncSession,
     conversation_id: int,
     question: str,
+    citations_out: Optional[list] = None,
 ):
     """
     完整对话流程（async generator，逐段 yield 文本增量）
-    调用方负责在结束后调用 persist_messages 落库
+    调用方负责在结束后调用 persist_messages 落库。
+    citations_out 传入 list 时，会把本次命中的知识条目填充进去（供前端展示引用卡片）。
     """
     # 会话与报告上下文
     conv = (await db.execute(
@@ -114,6 +116,18 @@ async def stream_chat_answer(
     # RAG 检索
     evidences = await retrieve_for_chat(question)
     evidence_block = _build_evidence_block(evidences)
+
+    if citations_out is not None:
+        citations_out.extend([
+            {
+                "id": ev["id"],
+                "text": ev["text"][:300],
+                "similarity": ev["similarity"],
+                "source_filename": ev["metadata"].get("source_filename", "知识库"),
+                "category": ev["metadata"].get("category", ""),
+            }
+            for ev in evidences
+        ])
 
     # 历史窗口
     history = await get_history(db, conversation_id, limit=HISTORY_WINDOW)

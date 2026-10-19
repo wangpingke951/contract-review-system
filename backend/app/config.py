@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 1024
     EMBEDDING_BASE_URL: str = ""
 
+    # ——— 多模态（图片合同识别）———
+    # 图片不做本地 OCR，交给多模态模型逐字转录。
+    # VISION_MODEL 必填（如 doubao-vision / qwen-vl-plus / Qwen/Qwen2.5-VL-7B-Instruct）；
+    # VISION_API_KEY、VISION_BASE_URL 留空则继承 LLM_API_KEY / LLM_BASE_URL。
+    VISION_MODEL: str = ""
+    VISION_API_KEY: str = ""
+    VISION_BASE_URL: str = ""
+
     # ——— 文件 ———
     UPLOAD_DIR: str = "./data/uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -64,6 +72,39 @@ class Settings(BaseSettings):
     # 单次审查的最长等待时间（秒）。超过则中断并提示用户稍后重试，
     # 避免同步请求长时间挂起占用连接（PRD 4.3 异常处理假设值 120 秒）
     REVIEW_TIMEOUT_SECONDS: int = 120
+
+    # 审查执行方式（PRD 5.4 要求后台异步，用户可离开页面）
+    # background = 进程内后台任务（本地开发默认，无需 Redis）
+    # celery     = 交给 Celery worker（Docker 部署形态）
+    # inline     = 请求内同步跑完（仅用于调试/测试）
+    REVIEW_EXECUTION_MODE: str = "background"
+
+    # 单次追问的最长等待时间（秒）。PRD 4.4 异常处理假设值 30 秒：
+    # 超时先回已生成的部分，再提示「回复超时，请重试」
+    CHAT_TIMEOUT_SECONDS: int = 30
+
+    # ——— 限流（每用户每分钟），<=0 表示不限 ———
+    RATE_LIMIT_REVIEW_PER_MINUTE: int = 10
+    RATE_LIMIT_CHAT_PER_MINUTE: int = 30
+
+    # ——— 自助注册 ———
+    ALLOW_REGISTER: bool = True
+    # 禁止注册的用户名（逗号分隔，小写比较），避免与系统/演示账号混淆
+    RESERVED_USERNAMES_TEXT: str = "admin,root,system,administrator,superadmin,guest"
+
+    # ——— 生产模式：由 FastAPI 托管前端构建产物 ———
+    # 开启后访问 http://<host>:8000 直接是前端页面（SPA），无需再起 vite / nginx。
+    # 前置条件：先执行 cd frontend && npm run build，生成 frontend/dist。
+    # 适用于「内网穿透只映射一个端口」或「单机交付」的场景。
+    SERVE_FRONTEND: bool = False
+
+    @property
+    def reserved_usernames(self) -> set[str]:
+        return {
+            n.strip().lower()
+            for n in (self.RESERVED_USERNAMES_TEXT or "").split(",")
+            if n.strip()
+        }
 
     # ——— 计算属性 ———
     @property

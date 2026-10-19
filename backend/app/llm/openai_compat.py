@@ -24,6 +24,8 @@ class OpenAICompatLLM(LLMProvider):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        # 最近一次 chat 调用返回的 usage（token 统计用；流式调用不填）
+        self.last_usage: dict = {}
 
     @property
     def _headers(self) -> dict:
@@ -57,6 +59,7 @@ class OpenAICompatLLM(LLMProvider):
             )
             resp.raise_for_status()
             data = resp.json()
+            self.last_usage = data.get("usage") or {}
             return data["choices"][0]["message"]["content"]
 
     async def stream_chat(

@@ -91,17 +91,23 @@
             <div class="card-header">
               <el-icon><Clock /></el-icon>
               <span>审查历史</span>
-              <el-button link type="primary" style="margin-left:auto" @click="loadList">
+              <el-select
+                v-model="templateId" size="small" clearable placeholder="默认模板"
+                style="width:150px;margin-left:auto;margin-right:8px"
+              >
+                <el-option v-for="t in templates" :key="t.id" :label="t.name" :value="t.id" />
+              </el-select>
+              <el-button link type="primary" @click="loadList">
                 <el-icon><Refresh /></el-icon> 刷新
               </el-button>
             </div>
           </template>
 
           <el-table :data="contracts" v-loading="loading" style="width:100%">
-            <el-table-column prop="id" label="ID" width="60" />
             <el-table-column label="文件名" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <span>{{ row.filename }}</span>
+                <el-tag v-if="row.version > 1" size="small" effect="plain" style="margin-left:6px">v{{ row.version }}</el-tag>
                 <el-tooltip v-if="row.parse_error" :content="row.parse_error" placement="top">
                   <el-icon color="#ef4444" class="err-icon"><WarningFilled /></el-icon>
                 </el-tooltip>
@@ -113,10 +119,16 @@
                 <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="创建时间" width="160">
+            <el-table-column label="追问" width="64">
+              <template #default="{ row }">
+                <span v-if="row.follow_up_count" class="follow-up">{{ row.follow_up_count }} 条</span>
+                <span v-else class="follow-up muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="150">
               <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="176" fixed="right">
+            <el-table-column label="操作" width="228" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="row.status === 'review_done'" link type="primary"
@@ -127,6 +139,9 @@
                   :loading="reviewingId === row.id"
                   @click="startReview({ contractId: row.id, name: row.filename })"
                 >开始审查</el-button>
+                <el-button link @click="triggerNewVersion(row)" title="上传这份合同的新版本">
+                  新版本
+                </el-button>
                 <el-popconfirm title="确认删除该合同？" @confirm="handleDelete(row)">
                   <template #reference>
                     <el-button link type="danger">删除</el-button>
@@ -138,6 +153,11 @@
               <el-empty description="暂无合同，上传第一份开始审查" :image-size="80" />
             </template>
           </el-table>
+
+          <input
+            ref="versionInput" type="file" style="display:none"
+            accept=".pdf,.docx,.png,.jpg,.jpeg" @change="handleVersionFile"
+          />
         </el-card>
       </el-col>
     </el-row>
@@ -193,7 +213,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { uploadContract, listContracts, deleteContract, getContract } from '@/api/contract'
+import { uploadContract, listContracts, deleteContract, getContract, uploadNewVersion } from '@/api/contract'
+import { listTemplates } from '@/api/template'
 import { createReview } from '@/api/review'
 
 const router = useRouter()
@@ -206,6 +227,14 @@ const uploading = ref(false)
 const reviewingId = ref(null)  // 正在发起审查的 contractId
 const loading = ref(false)
 const contracts = ref([])
+
+// 审查模板（发起审查时使用，留空走默认模板）
+const templates = ref([])
+const templateId = ref(null)
+
+// 上传新版本
+const versionInput = ref(null)
+const versionTarget = ref(null)
 
 const previewVisible = ref(false)
 const previewLoading = ref(false)
@@ -312,8 +341,8 @@ async function startReview(item, closePreview = false) {
 
   reviewingId.value = contractId
   try {
-    const report = await createReview(contractId)
-    ElMessage.success('审查完成')
+    const report = await createReview(contractId, templateId.value)
+    ElMessage.success('已提交审查，正在后台执行')
     if (closePreview) previewVisible.value = false
     // 该文件已进入报告页，从本次列表移除
     queue.value = queue.value.filter((f) => f.contractId !== contractId)
@@ -377,10 +406,36 @@ async function handleDelete(row) {
   await loadList()
 }
 
-onMounted(loadList)
+onMounted(async () => {
+  await loadList()
+  try { templates.value = await listTemplates() } catch (e) { /* ignore */ }
+})
+
+// —————————— 上传新版本 ——————————
+function triggerNewVersion(row) {
+  versionTarget.value = row
+  versionInput.value?.click()
+}
+
+async function handleVersionFile(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file || !versionTarget.value) return
+  try {
+    const res = await uploadNewVersion(versionTarget.value.id, file)
+    ElMessage.success(`已上传 v${res.version}，可发起审查后做版本对比`)
+    await loadList()
+  } catch (err) {
+    // request.js 已提示
+  } finally {
+    versionTarget.value = null
+  }
+}
 </script>
 
 <style scoped>
+.follow-up { font-size: 13px; color: #2563eb; font-weight: 600; }
+.follow-up.muted { color: #c0c4cc; font-weight: 400; }
 .card-header { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .upload-card { height: 100%; }
 .start-btn { width: 100%; margin-top: 16px; }
