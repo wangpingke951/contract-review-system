@@ -74,14 +74,19 @@
         </el-form-item>
         <el-form-item label="文件">
           <el-upload
+            ref="uploadRef"
             drag :auto-upload="false" :limit="1"
             accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg"
-            :on-change="(f) => (form.file = f.raw)"
+            :on-change="(f) => pickFile(f, 'form')"
             :on-remove="() => (form.file = null)"
           >
             <el-icon :size="32" color="#3b82f6"><UploadFilled /></el-icon>
             <div class="el-upload__text">拖拽或点击上传</div>
           </el-upload>
+          <div class="upload-hint">
+            支持 PDF / Word / TXT / MD / 图片，单文件 ≤ {{ MAX_MB }}MB。<br />
+            建议单份 ≤ 5MB（约 20 秒入库）；超过 10MB 需等待较久，且前端可能超时。
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -112,14 +117,16 @@
         </el-form-item>
         <el-form-item label="新文件">
           <el-upload
+            ref="replaceUploadRef"
             drag :auto-upload="false" :limit="1"
             accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg"
-            :on-change="(f) => (replaceForm.file = f.raw)"
+            :on-change="(f) => pickFile(f, 'replace')"
             :on-remove="() => (replaceForm.file = null)"
           >
             <el-icon :size="32" color="#3b82f6"><UploadFilled /></el-icon>
             <div class="el-upload__text">拖拽或点击上传</div>
           </el-upload>
+          <div class="upload-hint">单文件 ≤ {{ MAX_MB }}MB，建议 ≤ 5MB</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -161,6 +168,33 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const uploading = ref(false)
 const form = reactive({ category: 'guide', file: null })
+
+// 与后端 MAX_UPLOAD_SIZE_MB 保持一致；提前拦掉，避免传完几十 MB 才被拒
+const MAX_MB = 50
+const uploadRef = ref(null)
+const replaceUploadRef = ref(null)
+
+/**
+ * 选文件时做前置校验。
+ * el-upload 在 auto-upload=false 时不会走 before-upload，
+ * 所以只能在 on-change 里判断，超限时手动清空组件内部列表。
+ */
+function pickFile(uploadFile, target) {
+  const raw = uploadFile?.raw
+  const refObj = target === 'form' ? uploadRef.value : replaceUploadRef.value
+  const setter = target === 'form'
+    ? (v) => (form.file = v)
+    : (v) => (replaceForm.file = v)
+
+  if (!raw) return
+  if (raw.size > MAX_MB * 1024 * 1024) {
+    ElMessage.error(`文件 ${(raw.size / 1024 / 1024).toFixed(1)}MB，超过 ${MAX_MB}MB 上限`)
+    setter(null)
+    refObj?.clearFiles()
+    return
+  }
+  setter(raw)
+}
 
 // 搜索 / 筛选（PRD 4.5：顶部搜索框 + 分类筛选）
 const keyword = ref('')
@@ -256,4 +290,5 @@ onMounted(loadList)
 .card-header { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .toolbar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .cur-file { color: #6b7280; font-size: 13px; }
+.upload-hint { margin-top: 6px; font-size: 12px; color: #9ca3af; line-height: 1.6; }
 </style>
