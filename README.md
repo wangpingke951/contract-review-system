@@ -19,6 +19,7 @@
 | 任务中心 | 进行中 / 失败 / 待审查 / 解析失败四类任务总览，支持批量发起审查与自动刷新 |
 | 对话追问 | 围绕审查报告的 WebSocket 流式多轮对话，30 秒超时保护，回答附带可展开的知识库引用卡片 |
 | 管理后台 | 知识文档上传/替换（旧版本入历史）/删除（同步清理向量库）、版本历史、风险类别增删、操作审计日志、LLM 用量统计 |
+| 用户与权限 | 管理员可在页面上给**普通用户**逐项授予管理能力（知识库 / 审查模板 / 用量统计 / 审计日志 / 用户管理），**保存即时生效**，无需对方重新登录；支持禁用账号、重置密码 |
 | 模型配置 | 管理员在页面上切换模型提供商、填 API Key/模型名/Base URL，**保存即时生效**；支持一键连通性测试（真实发起最小请求，返回耗时与错误详情） |
 | 安全与限额 | 上传文件魔数校验（防改扩展名）、按用户限流（审查 10 次/分、追问 30 次/分）、并发审查去重、启动时清理中断任务 |
 | 异步审查 | 发起后立即返回 `running`，后台执行，报告页自动轮询刷新，可离开页面；支持进程内后台任务 / Celery 两种模式 |
@@ -140,12 +141,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 | 账号 | 密码 | 角色 |
 |---|---|---|
-| admin | admin123 | 管理员（可访问知识库/类别管理） |
-| user | user123 | 普通用户 |
+| admin | admin123 | 管理员（默认拥有全部权限） |
+| user | user123 | 普通用户（默认无管理权限，可由管理员授予） |
 
 > 登录页支持**自助注册**普通用户（「注册」标签）：用户名 3–32 位（字母/数字/下划线/中文），
 > 密码至少 6 位，注册成功自动登录。管理员账号不开放注册，由 `tests/seed_db.py` 初始化。
 > 如需关闭自助注册，在 `backend/.env` 设 `ALLOW_REGISTER=false`。
+
+> **普通用户注册后能做什么**：只有基础能力 —— 上传合同、发起审查、查看报告、追问、法律问答。
+> 需要管理能力时，由管理员在「用户与权限」页勾选项授予，例如给合规专员开「知识库管理」，
+> 给实习生开「用量统计」只读。权限存在数据库里、每次请求回查，改完立即生效或失效。
 
 > 开发环境无 API Key 时，可在 `.env` 中设置 `LLM_PROVIDER=mock` 体验完整流程（返回模拟报告）。
 
@@ -228,6 +233,7 @@ docker compose --profile celery up -d
 | 对话 | `GET /api/chat/conversations/{review_id}` · `GET .../messages` · `WS /ws/chat/{conv_id}?token=<jwt>` |
 | 法律问答 | `POST/GET /api/assistant/sessions` · `GET/POST /api/assistant/sessions/{id}/messages` · `DELETE .../{id}` · `WS /ws/assistant/{session_id}?token=<jwt>` |
 | 管理 | `POST /api/admin/knowledge/upload`（异步，秒回）· `POST /api/admin/knowledge/upload-batch`（批量）· `GET /api/admin/knowledge/{id}/progress`（入库进度）· `POST /api/admin/knowledge/{id}/retry`（失败重试）· `PUT /api/admin/knowledge/{id}`（替换）· `GET /api/admin/knowledge/{id}/versions` · `GET/DELETE /api/admin/knowledge/{id}` · `GET/POST/DELETE /api/admin/categories` · `GET /api/admin/audit-logs` · `GET /api/admin/usage-stats` |
+| 用户与权限 | `GET /api/admin/users` · `GET /api/admin/users/permissions`（权限目录）· `PUT /api/admin/users/{id}/permissions`（授权/回收）· `PUT /api/admin/users/{id}/status`（启用/禁用）· `PUT /api/admin/users/{id}/password`（重置密码） |
 | 模型配置 | `GET/PUT /api/admin/model-config` · `POST /api/admin/model-config/test`（连通性测试）· `GET /api/admin/model-config/providers` |
 | 健康 | `GET /api/health` |
 

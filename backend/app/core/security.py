@@ -67,8 +67,18 @@ def decode_access_token(token: str) -> dict:
 
 
 class TokenPayload:
-    """解析后的 token payload（结构化视图）"""
+    """
+    解析后的 token payload（结构化视图）
+
+    permissions 不放进 JWT：权限随时可能被管理员改动，
+    塞进 token 就得等过期才生效。这里由 get_current_user 每次请求查库填充。
+    """
     def __init__(self, data: dict):
         self.user_id = int(data["sub"])
         self.username: str = data["username"]
         self.role: UserRole = UserRole(data["role"])
+        self.permissions: set[str] = set()
+        self.is_active: bool = True
+
+    def has_permission(self, key: str) -> bool:
+        return self.role == UserRole.ADMIN or key in self.permissions

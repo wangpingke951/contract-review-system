@@ -113,7 +113,8 @@ async function handleLogin() {
     userStore.login({
       access_token: data.access_token,
       role: data.role,
-      username: form.username,
+      username: data.username || form.username,
+      permissions: data.permissions || [],
     })
     ElMessage.success('登录成功')
     const redirect = route.query.redirect || '/'
@@ -136,6 +137,7 @@ async function quickLogin(role) {
       access_token: data.access_token,
       role: data.role,
       username: creds.username,
+      permissions: data.permissions || [],
     })
     ElMessage.success(`已登录为 ${role === 'admin' ? '管理员' : '普通用户'}`)
     router.push('/')
@@ -188,6 +190,7 @@ async function handleRegister() {
       role: res.role,
       username: res.username,
       userId: res.user_id,
+      permissions: res.permissions || [],
     })
     ElMessage.success('注册成功，已自动登录')
     router.push('/')

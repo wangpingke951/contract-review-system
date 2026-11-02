@@ -31,6 +31,8 @@ ACTION_KNOWLEDGE_UPLOAD = "knowledge.upload"
 ACTION_KNOWLEDGE_REPLACE = "knowledge.replace"
 ACTION_KNOWLEDGE_DELETE = "knowledge.delete"
 ACTION_AUTH_LOGIN = "auth.login"
+ACTION_USER_PERMISSION = "user.permission"
+ACTION_USER_STATUS = "user.status"
 
 ACTION_LABELS = {
     ACTION_CONTRACT_UPLOAD: "上传合同",
@@ -46,6 +48,8 @@ ACTION_LABELS = {
     ACTION_KNOWLEDGE_REPLACE: "替换知识文档",
     ACTION_KNOWLEDGE_DELETE: "删除知识文档",
     ACTION_AUTH_LOGIN: "登录",
+    ACTION_USER_PERMISSION: "变更用户权限",
+    ACTION_USER_STATUS: "启用/禁用账号",
 }
 
 

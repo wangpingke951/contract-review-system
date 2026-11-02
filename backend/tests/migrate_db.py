@@ -49,6 +49,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("knowledge_docs", "total_chunks",
      "ALTER TABLE knowledge_docs ADD COLUMN total_chunks INT NOT NULL DEFAULT 0"),
     ("knowledge_docs", "error_message", "ALTER TABLE knowledge_docs ADD COLUMN error_message TEXT NULL"),
+    # 细粒度权限：普通用户可被授予部分管理能力
+    ("users", "permissions", "ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL"),
+    ("users", "is_active", "ALTER TABLE users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1"),
 ]
 
 

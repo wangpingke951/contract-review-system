@@ -32,11 +32,11 @@
             <el-icon><ChatDotRound /></el-icon>
             <span>法律问答</span>
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/admin/knowledge">
+          <el-menu-item v-if="hasPerm('knowledge:manage')" index="/admin/knowledge">
             <el-icon><FolderOpened /></el-icon>
             <span>知识库管理</span>
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/admin/templates">
+          <el-menu-item v-if="hasPerm('template:manage')" index="/admin/templates">
             <el-icon><Collection /></el-icon>
             <span>审查模板</span>
           </el-menu-item>
@@ -44,17 +44,21 @@
             <el-icon><Setting /></el-icon>
             <span>模型配置</span>
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/admin/categories">
+          <el-menu-item v-if="hasPerm('knowledge:manage')" index="/admin/categories">
             <el-icon><CollectionTag /></el-icon>
             <span>风险类别</span>
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/admin/audit">
+          <el-menu-item v-if="hasPerm('audit:view')" index="/admin/audit">
             <el-icon><Tickets /></el-icon>
             <span>审计日志</span>
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/admin/usage">
+          <el-menu-item v-if="hasPerm('stats:view')" index="/admin/usage">
             <el-icon><DataLine /></el-icon>
             <span>用量统计</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasPerm('user:manage')" index="/admin/users">
+            <el-icon><UserFilled /></el-icon>
+            <span>用户与权限</span>
           </el-menu-item>
         </el-menu>
       </el-aside>
@@ -82,10 +86,11 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { getMe } from '@/api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -93,6 +98,8 @@ const userStore = useUserStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const isAdmin = computed(() => userStore.role === 'admin')
+// 菜单按权限点显示；管理员恒为 true
+const hasPerm = (key) => userStore.hasPerm(key)
 const activeMenu = computed(() => route.path)
 
 async function handleLogout() {
@@ -102,6 +109,16 @@ async function handleLogout() {
     router.push('/login')
   } catch { /* 取消 */ }
 }
+
+// 刷新页面时以后端为准同步一次角色与权限：
+// 管理员可能在别处给这个账号加/减了权限，菜单要跟着变
+onMounted(async () => {
+  if (!userStore.isLoggedIn) return
+  try {
+    const me = await getMe()
+    userStore.setMe(me)
+  } catch { /* 401 由拦截器处理 */ }
+})
 </script>
 
 <style scoped>

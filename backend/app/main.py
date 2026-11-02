@@ -206,6 +206,7 @@ from app.routers import assistant as assistant_router     # noqa: E402
 from app.routers import templates as templates_router     # noqa: E402
 from app.routers import tasks as tasks_router             # noqa: E402
 from app.routers import model_config as model_config_router  # noqa: E402
+from app.routers import users as users_router             # noqa: E402
 
 app.include_router(auth_router.router,       prefix="/api/auth",      tags=["认证"])
 app.include_router(contracts_router.router,  prefix="/api/contracts", tags=["合同"])
@@ -216,6 +217,7 @@ app.include_router(assistant_router.router,  prefix="/api/assistant", tags=["法
 app.include_router(templates_router.router,  prefix="/api/templates", tags=["审查模板"])
 app.include_router(tasks_router.router,      prefix="/api/tasks",     tags=["任务中心"])
 app.include_router(model_config_router.router, prefix="/api/admin/model-config", tags=["模型配置"])
+app.include_router(users_router.router,        prefix="/api/admin/users", tags=["用户与权限"])
 app.include_router(chat_router.ws_router,                             tags=["对话WebSocket"])
 app.include_router(assistant_router.ws_router,                        tags=["法律问答WebSocket"])
 

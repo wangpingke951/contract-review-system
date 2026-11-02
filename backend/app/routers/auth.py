@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.permissions import effective_permissions
 from app.core.security import (
     UserRole,
     create_access_token,
@@ -49,12 +50,16 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+    username: str = ""
+    # 前端据此渲染菜单与路由守卫；管理员返回全部权限点
+    permissions: list[str] = []
 
 
 class UserResponse(BaseModel):
     id: int
     username: str
     role: str
+    permissions: list[str] = []
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -74,6 +79,13 @@ async def login(
             detail="用户名或密码错误",
         )
 
+    # 先验密码再验状态：避免用「已被禁用」这个提示帮人枚举用户名
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被禁用，请联系管理员",
+        )
+
     token = create_access_token(
         user_id=user.id,
         username=user.username,
@@ -91,7 +103,12 @@ async def login(
             detail="管理员登录",
             commit=True,
         )
-    return TokenResponse(access_token=token, role=user.role.value)
+    return TokenResponse(
+        access_token=token,
+        role=user.role.value,
+        username=user.username,
+        permissions=sorted(effective_permissions(user.role, user.permissions)),
+    )
 
 
 @router.post("/register", response_model=dict)
@@ -156,6 +173,8 @@ async def register(
             "role": user.role.value,
             "access_token": token,
             "token_type": "bearer",
+            # 新注册用户默认无任何管理权限，需管理员在「用户与权限」里授予
+            "permissions": [],
         },
         "message": "注册成功",
     }
@@ -163,9 +182,10 @@ async def register(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current: TokenPayload = Depends(get_current_user)):
-    """获取当前登录用户（需 JWT）"""
+    """获取当前登录用户（需 JWT）；权限点可能被管理员调整，前端应以此为准"""
     return UserResponse(
         id=current.user_id,
         username=current.username,
         role=current.role.value,
+        permissions=sorted(current.permissions),
     )

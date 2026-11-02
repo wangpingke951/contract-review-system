@@ -17,13 +17,15 @@ const routes = [
   },
   { path: '/reviews/:id(\\d+)', name: 'ReviewReport', component: () => import('@/views/ReviewReport.vue') },
 
-  // —— 管理员 ——
-  { path: '/admin/knowledge', name: 'KnowledgeManage', component: () => import('@/views/admin/KnowledgeManage.vue'), meta: { admin: true } },
-  { path: '/admin/categories', name: 'CategoryManage', component: () => import('@/views/admin/CategoryManage.vue'), meta: { admin: true } },
-  { path: '/admin/templates', name: 'TemplateManage', component: () => import('@/views/admin/TemplateManage.vue'), meta: { admin: true } },
+  // —— 管理类（按权限点控制，管理员天然全部可访问）——
+  { path: '/admin/knowledge', name: 'KnowledgeManage', component: () => import('@/views/admin/KnowledgeManage.vue'), meta: { perm: 'knowledge:manage' } },
+  { path: '/admin/categories', name: 'CategoryManage', component: () => import('@/views/admin/CategoryManage.vue'), meta: { perm: 'knowledge:manage' } },
+  { path: '/admin/templates', name: 'TemplateManage', component: () => import('@/views/admin/TemplateManage.vue'), meta: { perm: 'template:manage' } },
+  { path: '/admin/usage', name: 'UsageStats', component: () => import('@/views/admin/UsageStats.vue'), meta: { perm: 'stats:view' } },
+  { path: '/admin/audit', name: 'AuditLog', component: () => import('@/views/admin/AuditLog.vue'), meta: { perm: 'audit:view' } },
+  { path: '/admin/users', name: 'UserManage', component: () => import('@/views/admin/UserManage.vue'), meta: { perm: 'user:manage' } },
+  // 模型配置含 API Key，不可授权，始终管理员独占
   { path: '/admin/model-config', name: 'ModelConfig', component: () => import('@/views/admin/ModelConfig.vue'), meta: { admin: true } },
-  { path: '/admin/audit', name: 'AuditLog', component: () => import('@/views/admin/AuditLog.vue'), meta: { admin: true } },
-  { path: '/admin/usage', name: 'UsageStats', component: () => import('@/views/admin/UsageStats.vue'), meta: { admin: true } },
 
   // —— 兜底 ——
   { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -50,8 +52,14 @@ router.beforeEach((to, from, next) => {
     return
   }
 
-  // 需要管理员权限
+  // 管理员独占（如模型配置）
   if (to.meta.admin && userStore.role !== 'admin') {
+    next({ path: '/' })
+    return
+  }
+
+  // 权限点校验：管理员恒通过
+  if (to.meta.perm && !userStore.hasPerm(to.meta.perm)) {
     next({ path: '/' })
     return
   }

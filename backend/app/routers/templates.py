@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin, get_current_user, TokenPayload
+from app.core.dependencies import get_current_user, require_permission, TokenPayload
 from app.services import template_service
 from app.schemas.template import TemplateOut, TemplateCreate, TemplateUpdate
 
@@ -43,7 +43,7 @@ async def list_templates(
 async def create_template(
     body: TemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("template:manage")),
 ):
     tpl = await template_service.create_template(
         db,
@@ -61,7 +61,7 @@ async def update_template(
     template_id: int,
     body: TemplateUpdate,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("template:manage")),
 ):
     tpl = await template_service.update_template(
         db,
@@ -78,7 +78,7 @@ async def update_template(
 async def delete_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("template:manage")),
 ):
     await template_service.delete_template(db, template_id)
     return {"code": 0, "message": "删除成功", "data": None}

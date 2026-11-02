@@ -99,3 +99,25 @@ export function testModelConnection(data) {
 export function listModelProviders() {
   return request.get('/admin/model-config/providers')
 }
+
+// ——— 用户与权限 ———
+export function listUsers() {
+  return request.get('/admin/users')
+}
+
+export function listPermissionCatalog() {
+  return request.get('/admin/users/permissions')
+}
+
+/** 全量覆盖该用户的权限点，传勾选后的完整列表 */
+export function updateUserPermissions(id, permissions) {
+  return request.put(`/admin/users/${id}/permissions`, { permissions })
+}
+
+export function updateUserStatus(id, isActive) {
+  return request.put(`/admin/users/${id}/status`, { is_active: isActive })
+}
+
+export function resetUserPassword(id, newPassword) {
+  return request.put(`/admin/users/${id}/password`, { new_password: newPassword })
+}

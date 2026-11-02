@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin, TokenPayload
+from app.core.dependencies import require_permission, TokenPayload
 from app.core.exceptions import ValidationError
 from app.models.audit import (
     ACTION_KNOWLEDGE_DELETE,
@@ -81,7 +81,7 @@ async def upload_knowledge(
     file: UploadFile = File(...),
     category: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     cat = _parse_category(category)
     doc = await admin_service.upload_knowledge(db, file, cat, current.user_id)
@@ -103,7 +103,7 @@ async def upload_knowledge_batch(
     files: list[UploadFile] = File(...),
     category: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     """
     批量上传：每个文件单独建记录，后台串行入库。
@@ -143,7 +143,7 @@ async def upload_knowledge_batch(
 async def knowledge_progress(
     doc_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     """前端轮询入库进度；status 为 enabled / failed 时即可停止轮询"""
     d = await admin_service.get_knowledge_progress(db, doc_id)
@@ -162,7 +162,7 @@ async def knowledge_progress(
 async def retry_knowledge(
     doc_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     """失败文档原地重试入库（复用已保存的原文件，无需重新上传）"""
     doc = await admin_service.retry_ingest(db, doc_id)
@@ -185,7 +185,7 @@ async def replace_knowledge(
     file: UploadFile = File(...),
     category: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     cat = _parse_category(category)
     doc = await admin_service.replace_knowledge(db, doc_id, file, cat, current.user_id)
@@ -206,7 +206,7 @@ async def replace_knowledge(
 async def list_versions(
     doc_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     versions = await admin_service.list_versions(db, doc_id)
     return [
@@ -221,7 +221,7 @@ async def list_versions(
 @router.get("/knowledge", response_model=list[KnowledgeDocOut])
 async def list_knowledge(
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     docs = await admin_service.list_knowledge(db)
     return [_doc_out(d) for d in docs]
@@ -231,7 +231,7 @@ async def list_knowledge(
 async def delete_knowledge(
     doc_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     await admin_service.delete_knowledge(db, doc_id)
     await audit_service.record(
@@ -251,7 +251,7 @@ async def delete_knowledge(
 @router.get("/categories", response_model=list[CategoryOut])
 async def list_categories(
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     cats = await admin_service.list_categories(db)
     return [CategoryOut(id=c.id, name=c.name, created_at=c.created_at) for c in cats]
@@ -261,7 +261,7 @@ async def list_categories(
 async def add_category(
     body: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     cat = await admin_service.add_category(db, body.name, current.user_id)
     return CategoryOut(id=cat.id, name=cat.name, created_at=cat.created_at)
@@ -271,7 +271,7 @@ async def add_category(
 async def delete_category(
     cat_id: int,
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("knowledge:manage")),
 ):
     await admin_service.delete_category(db, cat_id)
     return {"code": 0, "message": "删除成功", "data": None}
@@ -281,7 +281,7 @@ async def delete_category(
 async def usage_stats(
     days: int = Query(7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("stats:view")),
 ):
     """LLM 调用用量统计（近 N 天）"""
     return await usage_service.stats(db, days=days)
@@ -294,7 +294,7 @@ async def list_audit_logs(
     size: int = Query(50, ge=1, le=200),
     action: str | None = Query(None, description="按动作筛选，留空为全部"),
     db: AsyncSession = Depends(get_db),
-    current: TokenPayload = Depends(get_current_admin),
+    current: TokenPayload = Depends(require_permission("audit:view")),
 ):
     items, total = await audit_service.list_logs(db, page=page, size=size, action=action)
     return AuditLogListResponse(
