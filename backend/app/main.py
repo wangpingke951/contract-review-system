@@ -140,6 +140,13 @@ async def lifespan(app: FastAPI):
             if cnt:
                 logger.info(f"🧹 清理了 {cnt} 条中断的审查任务")
 
+        # —— 同样的道理：知识库摄入也是进程内后台任务，重启后 CHUNKING 会永远转圈 ——
+        from app.services import admin_service as _admin_service
+        async with AsyncSession(engine) as session:
+            stuck = await _admin_service.reset_stuck_ingest(session)
+            if stuck:
+                logger.info(f"🧹 标记了 {stuck} 个中断的知识库入库任务为失败（可重试）")
+
     except Exception as e:
         logger.warning(f"⚠️ 启动初始化失败: {e}")
 

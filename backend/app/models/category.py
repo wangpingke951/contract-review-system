@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import DateTime, String, Integer, Column, ForeignKey, Enum as SQLEnum
+from sqlalchemy import DateTime, String, Integer, Column, ForeignKey, Enum as SQLEnum, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -56,6 +56,14 @@ class KnowledgeDoc(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # ChromaDB 里的 collection 内的 metadata 主键
     chroma_source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # —— 异步摄入进度（大文档上传时前端据此显示进度条）——
+    # 0-100；CHUNKING 期间由后台任务每写完一批 chunk 更新一次
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    processed_chunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 失败原因（面向用户，失败时写入，成功清空）
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     uploader_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False,

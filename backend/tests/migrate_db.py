@@ -42,6 +42,13 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("reviews", "template_name", "ALTER TABLE reviews ADD COLUMN template_name VARCHAR(128) NULL"),
     ("reviews", "finalized_at", "ALTER TABLE reviews ADD COLUMN finalized_at DATETIME NULL"),
     ("reviews", "finalized_by", "ALTER TABLE reviews ADD COLUMN finalized_by INT NULL"),
+    # 知识库异步摄入：进度与失败原因
+    ("knowledge_docs", "progress", "ALTER TABLE knowledge_docs ADD COLUMN progress INT NOT NULL DEFAULT 0"),
+    ("knowledge_docs", "processed_chunks",
+     "ALTER TABLE knowledge_docs ADD COLUMN processed_chunks INT NOT NULL DEFAULT 0"),
+    ("knowledge_docs", "total_chunks",
+     "ALTER TABLE knowledge_docs ADD COLUMN total_chunks INT NOT NULL DEFAULT 0"),
+    ("knowledge_docs", "error_message", "ALTER TABLE knowledge_docs ADD COLUMN error_message TEXT NULL"),
 ]
 
 
@@ -93,6 +100,14 @@ def main() -> None:
                     "ENUM('RUNNING','DONE','FAILED') NOT NULL DEFAULT 'DONE'"
                 )
                 print("[ok]   reviews.status extended with 'RUNNING'")
+
+            # 历史知识文档已入库，进度字段补成 100，避免前端显示 0%
+            cur.execute(
+                "UPDATE knowledge_docs SET progress = 100 "
+                "WHERE status = 'ENABLED' AND progress = 0"
+            )
+            if cur.rowcount:
+                print(f"[ok]   {cur.rowcount} 条已入库的知识文档进度补为 100")
         conn.commit()
     finally:
         conn.close()

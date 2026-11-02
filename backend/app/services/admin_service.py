@@ -2,7 +2,9 @@
 app/services/admin_service.py — 管理后台业务逻辑
 
 知识库：
-- upload_knowledge: 解析 → 切块 → 向量化 → ChromaDB upsert → knowledge_docs 落库
+- upload_knowledge / upload 批量: 只做校验落盘建记录，立即返回
+- run_ingest: 后台任务，解析 → 切块 → 分批向量化 → ChromaDB upsert，逐批更新进度
+- retry_ingest: 失败文档原地重试（复用已保存文件）
 - replace_knowledge: 原位替换（旧版本写入 knowledge_doc_versions，向量与文件同步替换）
 - delete_knowledge: ChromaDB 按来源删除 + DB 记录删除（不可恢复）
 - list_versions: 历史版本列表
@@ -11,6 +13,8 @@ app/services/admin_service.py — 管理后台业务逻辑
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from datetime import datetime
 
@@ -34,6 +38,7 @@ from app.rag.embedding import get_embedding
 from app.rag import vectorstore
 
 settings = get_settings()
+logger = logging.getLogger("app")
 
 # PRD 4.5：知识文档支持 DOCX / PDF / TXT（md 作为纯文本一并支持）
 PLAIN_TEXT_EXTS = {"txt", "md"}
@@ -109,23 +114,104 @@ async def _save_upload(file: UploadFile) -> tuple[str, str]:
     return filename, file_path
 
 
-async def _chunk_and_index(filename: str, text: str, doc_id: int, category: KnowledgeCategory) -> int:
-    """切块 + 向量化 + 写向量库，返回切块数"""
-    chunks = chunk_knowledge_text(
-        text, source_doc_id=doc_id,
-        source_filename=filename, category=category.value,
-    )
-    if not chunks:
-        raise ValidationError("切块结果为空")
+# —— 异步摄入：批量向量化，每批写完更新一次进度 ——
+# 批大小：本地 CPU 向量化约 40 块/秒，32 块一批约 0.8 秒，进度条刷新足够平滑，
+# 又不会因为频繁 commit 拖慢整体速度。
+INGEST_BATCH_SIZE = 32
 
-    embedding = get_embedding()
-    vectors = await embedding.embed_batch([c.text for c in chunks])
-    vectorstore.upsert_chunks(
-        chunks=[c.text for c in chunks],
-        metadatas=[c.metadata for c in chunks],
-        embeddings=vectors,
-    )
-    return len(chunks)
+# 全局串行锁：向量化是 CPU 密集型，并发摄入只会互相抢核，反而更慢（实测并发无收益）
+_ingest_lock: "asyncio.Lock | None" = None
+
+
+def _get_ingest_lock() -> "asyncio.Lock":
+    global _ingest_lock
+    if _ingest_lock is None:
+        _ingest_lock = asyncio.Lock()
+    return _ingest_lock
+
+
+def schedule_ingest(doc_id: int) -> None:
+    """把摄入任务丢到后台（不阻塞请求）。需在事件循环内调用。"""
+    asyncio.create_task(run_ingest(doc_id))
+
+
+async def run_ingest(doc_id: int) -> None:
+    """
+    异步摄入执行体：解析 → 切块 → 分批向量化 → 写向量库 → 更新进度。
+
+    使用独立 session —— 它在请求返回之后才执行。
+    失败时清除已写入的部分向量，避免知识库里留下半份文档。
+    """
+    from app.core.database import SessionLocal
+
+    async with _get_ingest_lock():
+        async with SessionLocal() as db:
+            doc = (await db.execute(
+                select(KnowledgeDoc).where(KnowledgeDoc.id == doc_id)
+            )).scalar_one_or_none()
+            if not doc:
+                return
+
+            try:
+                doc.status = KnowledgeStatus.CHUNKING
+                doc.progress = 0
+                doc.processed_chunks = 0
+                doc.total_chunks = 0
+                doc.error_message = None
+                await db.commit()
+
+                text = await _extract_text(doc.filename, doc.file_path)
+                chunks = chunk_knowledge_text(
+                    text, source_doc_id=doc.id,
+                    source_filename=doc.filename, category=doc.category.value,
+                )
+                if not chunks:
+                    raise ValidationError("切块结果为空，无法入库")
+
+                total = len(chunks)
+                doc.total_chunks = total
+                await db.commit()
+
+                embedding = get_embedding()
+                written = 0
+                for start in range(0, total, INGEST_BATCH_SIZE):
+                    batch = chunks[start:start + INGEST_BATCH_SIZE]
+                    vectors = await embedding.embed_batch([c.text for c in batch])
+                    vectorstore.upsert_chunks(
+                        chunks=[c.text for c in batch],
+                        metadatas=[c.metadata for c in batch],
+                        embeddings=vectors,
+                    )
+                    written += len(batch)
+                    doc.processed_chunks = written
+                    # 留 1% 给最后的落库，避免进度条卡在 100% 却还没启用
+                    doc.progress = min(99, int(written * 100 / total))
+                    await db.commit()
+
+                doc.chunk_count = total
+                doc.progress = 100
+                doc.status = KnowledgeStatus.ENABLED
+                doc.error_message = None
+                await db.commit()
+                logger.info("知识文档入库完成: id=%s, %s 块", doc.id, total)
+
+            except ValidationError as e:
+                await _mark_ingest_failed(db, doc, str(e))
+            except Exception as e:  # noqa: BLE001
+                logger.exception("知识文档入库失败: id=%s", doc_id)
+                await _mark_ingest_failed(db, doc, f"知识文档处理失败: {e}")
+
+
+async def _mark_ingest_failed(db: AsyncSession, doc: KnowledgeDoc, message: str) -> None:
+    """标记失败并清掉可能已写入的部分向量"""
+    try:
+        vectorstore.delete_by_source(doc.id)
+    except Exception:  # noqa: BLE001
+        logger.warning("清理部分向量失败: doc_id=%s", doc.id)
+    doc.status = KnowledgeStatus.FAILED
+    doc.error_message = message[:500]
+    doc.chunk_count = 0
+    await db.commit()
 
 
 def _remove_file(path: str | None) -> None:
@@ -142,7 +228,15 @@ async def upload_knowledge(
     file: UploadFile,
     category: KnowledgeCategory,
     admin_id: int,
+    *,
+    auto_start: bool = True,
 ) -> KnowledgeDoc:
+    """
+    上传知识文档：只做「校验 + 落盘 + 建记录」，解析与向量化交给后台任务。
+
+    这样 50 万字级别的文档也不会把 HTTP 请求拖到超时（前端 axios 180s），
+    上传接口通常在 1 秒内返回，前端随后轮询 /knowledge/{id}/progress 看进度。
+    """
     filename, file_path = await _save_upload(file)
 
     doc = KnowledgeDoc(
@@ -150,27 +244,73 @@ async def upload_knowledge(
         file_path=file_path,
         category=category,
         status=KnowledgeStatus.CHUNKING,
+        progress=0,
+        processed_chunks=0,
+        total_chunks=0,
+        chunk_count=0,
         uploader_id=admin_id,
     )
     db.add(doc)
-    await db.flush()
-
-    try:
-        text = await _extract_text(filename, file_path)
-        doc.chunk_count = await _chunk_and_index(filename, text, doc.id, category)
-        doc.status = KnowledgeStatus.ENABLED
-    except ValidationError:
-        doc.status = KnowledgeStatus.FAILED
-        await db.commit()
-        raise
-    except Exception as e:
-        doc.status = KnowledgeStatus.FAILED
-        await db.commit()
-        raise ValidationError(f"知识文档处理失败: {e}")
-
     await db.commit()
     await db.refresh(doc)
+
+    if auto_start:
+        schedule_ingest(doc.id)
     return doc
+
+
+async def retry_ingest(db: AsyncSession, doc_id: int) -> KnowledgeDoc:
+    """对 failed 的文档原地重试（复用已保存的原始文件，不用重新上传）"""
+    doc = (await db.execute(
+        select(KnowledgeDoc).where(KnowledgeDoc.id == doc_id)
+    )).scalar_one_or_none()
+    if not doc:
+        raise NotFoundError("知识文档不存在")
+    if doc.status == KnowledgeStatus.ENABLED:
+        raise ValidationError("该文档已入库成功，无需重试")
+    if not os.path.exists(doc.file_path):
+        raise ValidationError("原始文件已丢失，请重新上传")
+
+    doc.status = KnowledgeStatus.CHUNKING
+    doc.progress = 0
+    doc.processed_chunks = 0
+    doc.error_message = None
+    await db.commit()
+
+    schedule_ingest(doc.id)
+    await db.refresh(doc)
+    return doc
+
+
+async def get_knowledge_progress(db: AsyncSession, doc_id: int) -> KnowledgeDoc:
+    doc = (await db.execute(
+        select(KnowledgeDoc).where(KnowledgeDoc.id == doc_id)
+    )).scalar_one_or_none()
+    if not doc:
+        raise NotFoundError("知识文档不存在")
+    return doc
+
+
+async def reset_stuck_ingest(db: AsyncSession) -> int:
+    """
+    服务启动时调用：把卡在 CHUNKING 的文档标记为失败。
+
+    摄入是进程内后台任务，服务重启会让它凭空消失，DB 里的 CHUNKING 会永远停在那，
+    前端进度条也就一直转圈。这里统一置为失败，让用户看到「可重试」。
+    """
+    docs = (await db.execute(
+        select(KnowledgeDoc).where(KnowledgeDoc.status == KnowledgeStatus.CHUNKING)
+    )).scalars().all()
+    for doc in docs:
+        doc.status = KnowledgeStatus.FAILED
+        doc.error_message = "服务重启导致入库中断，请点「重试入库」"
+        try:
+            vectorstore.delete_by_source(doc.id)
+        except Exception:  # noqa: BLE001
+            pass
+    if docs:
+        await db.commit()
+    return len(docs)
 
 
 async def replace_knowledge(
@@ -212,23 +352,17 @@ async def replace_knowledge(
     doc.file_path = file_path
     doc.category = category
     doc.status = KnowledgeStatus.CHUNKING
-
-    try:
-        text = await _extract_text(filename, file_path)
-        doc.chunk_count = await _chunk_and_index(filename, text, doc.id, category)
-        doc.status = KnowledgeStatus.ENABLED
-    except ValidationError:
-        doc.status = KnowledgeStatus.FAILED
-        await db.commit()
-        raise
-    except Exception as e:
-        doc.status = KnowledgeStatus.FAILED
-        await db.commit()
-        raise ValidationError(f"知识文档替换失败: {e}")
+    doc.progress = 0
+    doc.processed_chunks = 0
+    doc.total_chunks = 0
+    doc.error_message = None
 
     _remove_file(old_path)
     await db.commit()
     await db.refresh(doc)
+
+    # 换成后台摄入，避免大文档把请求拖超时
+    schedule_ingest(doc.id)
     return doc
 
 

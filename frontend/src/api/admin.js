@@ -11,6 +11,31 @@ export function uploadKnowledge(file, category) {
   })
 }
 
+/**
+ * 批量上传：一次最多 20 个文件。
+ * 返回 { uploaded: [...], rejected: [{filename, reason}] }，
+ * 单个文件校验失败不会影响其它文件。
+ */
+export function uploadKnowledgeBatch(files, category) {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  form.append('category', category)
+  return request.post('/admin/knowledge/upload-batch', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  })
+}
+
+/** 入库进度（前端轮询用） */
+export function getKnowledgeProgress(id) {
+  return request.get(`/admin/knowledge/${id}/progress`)
+}
+
+/** 失败文档原地重试入库 */
+export function retryKnowledge(id) {
+  return request.post(`/admin/knowledge/${id}/retry`)
+}
+
 /** 原位替换知识文档内容（旧版本进历史） */
 export function replaceKnowledge(id, file, category) {
   const form = new FormData()

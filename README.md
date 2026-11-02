@@ -9,7 +9,7 @@
 | 模块 | 说明 |
 |---|---|
 | 合同上传与多模态解析 | 支持 PDF（pdfplumber）/ Word（python-docx）/ 图片扫描件（**多模态大模型识别**，PNG/JPG），输出结构化章节与字符级定位 |
-| RAG 知识库 | 管理员上传审查指引/模板/判例/法规（PDF/DOCX/TXT），自动条款级切块 → 向量化 → 入库（ChromaDB），报告风险项附带可溯源依据 |
+| RAG 知识库 | 管理员上传审查指引/模板/判例/法规（PDF/DOCX/TXT），自动条款级切块 → 向量化 → 入库（ChromaDB），报告风险项附带可溯源依据。**上传异步化**：支持一次多选最多 20 个文件，接口秒回，后台串行入库并逐条显示进度，50 万字文档不再阻塞请求 |
 | 智能审查报告 | 9 个审查维度独立检索 → LLM 结构化输出（总体风险按高风险条数规则判定 + 风险项：等级/原文片段/问题/修改建议/正面发现） |
 | 风险项处置 | 单条风险项可标记「已确认 / 待修改 / 已忽略」，状态随报告保存 |
 | 报告定稿 | 定稿后锁定风险项、禁止重审；可取消定稿，导出报告带定稿信息 |
@@ -227,7 +227,7 @@ docker compose --profile celery up -d
 | 任务 | `GET /api/tasks` · `POST /api/tasks/batch-review` |
 | 对话 | `GET /api/chat/conversations/{review_id}` · `GET .../messages` · `WS /ws/chat/{conv_id}?token=<jwt>` |
 | 法律问答 | `POST/GET /api/assistant/sessions` · `GET/POST /api/assistant/sessions/{id}/messages` · `DELETE .../{id}` · `WS /ws/assistant/{session_id}?token=<jwt>` |
-| 管理 | `POST /api/admin/knowledge/upload` · `PUT /api/admin/knowledge/{id}`（替换）· `GET /api/admin/knowledge/{id}/versions` · `GET/DELETE /api/admin/knowledge/{id}` · `GET/POST/DELETE /api/admin/categories` · `GET /api/admin/audit-logs` · `GET /api/admin/usage-stats` |
+| 管理 | `POST /api/admin/knowledge/upload`（异步，秒回）· `POST /api/admin/knowledge/upload-batch`（批量）· `GET /api/admin/knowledge/{id}/progress`（入库进度）· `POST /api/admin/knowledge/{id}/retry`（失败重试）· `PUT /api/admin/knowledge/{id}`（替换）· `GET /api/admin/knowledge/{id}/versions` · `GET/DELETE /api/admin/knowledge/{id}` · `GET/POST/DELETE /api/admin/categories` · `GET /api/admin/audit-logs` · `GET /api/admin/usage-stats` |
 | 模型配置 | `GET/PUT /api/admin/model-config` · `POST /api/admin/model-config/test`（连通性测试）· `GET /api/admin/model-config/providers` |
 | 健康 | `GET /api/health` |
 

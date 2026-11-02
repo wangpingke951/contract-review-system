@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class KnowledgeDocOut(BaseModel):
@@ -13,6 +13,27 @@ class KnowledgeDocOut(BaseModel):
     status: str
     chunk_count: int
     created_at: datetime
+    # 异步摄入进度（0-100）；status=enabled 时为 100
+    progress: int = 0
+    processed_chunks: int = 0
+    total_chunks: int = 0
+    error_message: Optional[str] = None
+
+
+class KnowledgeBatchUploadResponse(BaseModel):
+    """批量上传回执：逐个文件给出结果，失败的不会中断其它文件"""
+    uploaded: List[KnowledgeDocOut] = Field(default_factory=list)
+    rejected: List[dict] = Field(default_factory=list)
+
+
+class KnowledgeProgressOut(BaseModel):
+    id: int
+    status: str
+    progress: int
+    processed_chunks: int
+    total_chunks: int
+    chunk_count: int
+    error_message: Optional[str] = None
 
 
 class KnowledgeVersionOut(BaseModel):

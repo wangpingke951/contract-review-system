@@ -32,6 +32,8 @@ from app.services import admin_service, audit_service, usage_service
 from app.schemas.admin import (
     KnowledgeDocOut,
     KnowledgeVersionOut,
+    KnowledgeBatchUploadResponse,
+    KnowledgeProgressOut,
     CategoryOut,
     CategoryCreate,
     AuditLogOut,
@@ -39,6 +41,26 @@ from app.schemas.admin import (
 )
 
 router = APIRouter()
+
+# 单次批量上传的文件数上限（防止一次拖 100 个文件把队列堵死）
+MAX_BATCH_FILES = 20
+
+
+def _doc_out(d) -> KnowledgeDocOut:
+    # 已入库的一律视为 100%（历史数据可能没写 progress）
+    progress = 100 if d.status.value == "enabled" else (d.progress or 0)
+    return KnowledgeDocOut(
+        id=d.id,
+        filename=d.filename,
+        category=d.category.value,
+        status=d.status.value,
+        chunk_count=d.chunk_count,
+        created_at=d.created_at,
+        progress=progress,
+        processed_chunks=d.processed_chunks or 0,
+        total_chunks=d.total_chunks or 0,
+        error_message=d.error_message,
+    )
 
 
 def _parse_category(raw: str) -> KnowledgeCategory:
@@ -70,13 +92,91 @@ async def upload_knowledge(
         action=ACTION_KNOWLEDGE_UPLOAD,
         target_type="knowledge_doc",
         target_id=doc.id,
-        detail=f"{doc.filename}（{doc.category.value}，{doc.chunk_count} 块）",
+        detail=f"{doc.filename}（{doc.category.value}，后台入库中）",
         commit=True,
     )
-    return KnowledgeDocOut(
-        id=doc.id, filename=doc.filename, category=doc.category.value,
-        status=doc.status.value, chunk_count=doc.chunk_count, created_at=doc.created_at,
+    return _doc_out(doc)
+
+
+@router.post("/knowledge/upload-batch", response_model=KnowledgeBatchUploadResponse)
+async def upload_knowledge_batch(
+    files: list[UploadFile] = File(...),
+    category: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current: TokenPayload = Depends(get_current_admin),
+):
+    """
+    批量上传：每个文件单独建记录，后台串行入库。
+
+    单个文件校验失败（类型/大小/魔数）只记入 rejected，不影响其它文件。
+    """
+    if len(files) > MAX_BATCH_FILES:
+        raise ValidationError(f"一次最多上传 {MAX_BATCH_FILES} 个文件，当前 {len(files)} 个")
+
+    cat = _parse_category(category)
+    uploaded = []
+    rejected = []
+
+    for f in files:
+        try:
+            doc = await admin_service.upload_knowledge(db, f, cat, current.user_id)
+            uploaded.append(_doc_out(doc))
+        except ValidationError as e:
+            rejected.append({"filename": f.filename or "unnamed", "reason": str(e)})
+
+    if uploaded:
+        await audit_service.record(
+            db,
+            actor_id=current.user_id,
+            actor_name=current.username,
+            action=ACTION_KNOWLEDGE_UPLOAD,
+            target_type="knowledge_doc",
+            target_id=uploaded[0].id,
+            detail=f"批量上传 {len(uploaded)} 个文档（{cat.value}）",
+            commit=True,
+        )
+
+    return KnowledgeBatchUploadResponse(uploaded=uploaded, rejected=rejected)
+
+
+@router.get("/knowledge/{doc_id}/progress", response_model=KnowledgeProgressOut)
+async def knowledge_progress(
+    doc_id: int,
+    db: AsyncSession = Depends(get_db),
+    current: TokenPayload = Depends(get_current_admin),
+):
+    """前端轮询入库进度；status 为 enabled / failed 时即可停止轮询"""
+    d = await admin_service.get_knowledge_progress(db, doc_id)
+    return KnowledgeProgressOut(
+        id=d.id,
+        status=d.status.value,
+        progress=d.progress or 0,
+        processed_chunks=d.processed_chunks or 0,
+        total_chunks=d.total_chunks or 0,
+        chunk_count=d.chunk_count,
+        error_message=d.error_message,
     )
+
+
+@router.post("/knowledge/{doc_id}/retry", response_model=KnowledgeDocOut)
+async def retry_knowledge(
+    doc_id: int,
+    db: AsyncSession = Depends(get_db),
+    current: TokenPayload = Depends(get_current_admin),
+):
+    """失败文档原地重试入库（复用已保存的原文件，无需重新上传）"""
+    doc = await admin_service.retry_ingest(db, doc_id)
+    await audit_service.record(
+        db,
+        actor_id=current.user_id,
+        actor_name=current.username,
+        action=ACTION_KNOWLEDGE_UPLOAD,
+        target_type="knowledge_doc",
+        target_id=doc.id,
+        detail=f"重试入库：{doc.filename}",
+        commit=True,
+    )
+    return _doc_out(doc)
 
 
 @router.put("/knowledge/{doc_id}", response_model=KnowledgeDocOut)
@@ -96,13 +196,10 @@ async def replace_knowledge(
         action=ACTION_KNOWLEDGE_REPLACE,
         target_type="knowledge_doc",
         target_id=doc.id,
-        detail=f"{doc.filename}（{doc.category.value}，{doc.chunk_count} 块）",
+        detail=f"{doc.filename}（{doc.category.value}，替换后后台入库中）",
         commit=True,
     )
-    return KnowledgeDocOut(
-        id=doc.id, filename=doc.filename, category=doc.category.value,
-        status=doc.status.value, chunk_count=doc.chunk_count, created_at=doc.created_at,
-    )
+    return _doc_out(doc)
 
 
 @router.get("/knowledge/{doc_id}/versions", response_model=list[KnowledgeVersionOut])
@@ -127,10 +224,7 @@ async def list_knowledge(
     current: TokenPayload = Depends(get_current_admin),
 ):
     docs = await admin_service.list_knowledge(db)
-    return [KnowledgeDocOut(
-        id=d.id, filename=d.filename, category=d.category.value,
-        status=d.status.value, chunk_count=d.chunk_count, created_at=d.created_at,
-    ) for d in docs]
+    return [_doc_out(d) for d in docs]
 
 
 @router.delete("/knowledge/{doc_id}")
